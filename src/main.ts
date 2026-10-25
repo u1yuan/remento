@@ -13,6 +13,8 @@ type Attendee = {
   links: SocialLink[];
   connections: Connection[];
   dismissedCues: string[];
+  /** Number of sequential moments completed; monotonic across edits/removals. */
+  milestone?: number;
 };
 type EventInfo = {
   id: string;
@@ -25,7 +27,7 @@ type EventInfo = {
   moments: { id: MomentId; label: string; cueAt: string }[];
 };
 type Status = { event: EventInfo; closedAt: string | null; joinCount: number };
-type Screen = 'join' | 'home' | 'activity' | 'memory' | 'qr' | 'scan' | 'connections' | 'recap' | 'export' | 'organizer';
+type Screen = 'join' | 'home' | 'activity' | 'memory' | 'qr' | 'scan' | 'keepsakes' | 'recap' | 'export' | 'organizer';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const eventKey = 'codex-uiai-2026';
@@ -62,6 +64,9 @@ let includeActivityPhoto = true;
 let qrDataUrl = '';
 let cameraStream: MediaStream | null = null;
 let nudge = '';
+let savedStamp = false;
+let recapMotion = 0;
+let organizerCountChanged = false;
 
 function readLocal<T>(key: string): T | null {
   try {
@@ -111,6 +116,35 @@ function completeCount() {
   return (['arrival', 'activity', 'memory', 'reconnect'] as MomentId[]).filter(completed).length;
 }
 
+const momentOrder: MomentId[] = ['arrival', 'activity', 'memory', 'reconnect'];
+
+function legacyMilestone() {
+  let count = 0;
+  while (count < momentOrder.length && completed(momentOrder[count])) count++;
+  return count;
+}
+
+function advanceMilestone() {
+  if (!attendee) return;
+  let milestone = Math.max(attendee.milestone ?? 0, legacyMilestone());
+  while (milestone < momentOrder.length && completed(momentOrder[milestone])) milestone++;
+  attendee.milestone = milestone;
+}
+
+if (attendee) {
+  attendee.links ??= [];
+  attendee.connections ??= [];
+  attendee.dismissedCues ??= [];
+  attendee.activityPhoto ??= '';
+  attendee.memory ??= '';
+  attendee.memoryPhoto ??= '';
+  const previousMilestone = attendee.milestone;
+  advanceMilestone();
+  if (previousMilestone !== attendee.milestone) {
+    try { localStorage.setItem(localKey, JSON.stringify(attendee)); } catch { /* The in-memory migration still works for this visit. */ }
+  }
+}
+
 function eventTimeRange() {
   const formatter = new Intl.DateTimeFormat('en-PH', { hour: 'numeric', minute: '2-digit', timeZone: eventInfo.timezone });
   return `${formatter.format(new Date(eventInfo.startsAt))}–${formatter.format(new Date(eventInfo.endsAt))} Manila time`;
@@ -121,7 +155,7 @@ function button(label: string, action: string, style = 'primary', extra = '') {
 }
 
 function header(back = false) {
-  return `<header class="site-header"><a class="brand" href="#" data-action="home" aria-label="Remento home"><span class="brand-mark">r</span><span>remento</span></a><div class="header-right">${back ? '<button class="text-button" data-action="back">← Back</button>' : '<span class="local-badge"><i></i> Your little event book</span>'}</div></header>`;
+  return `<header class="site-header"><a class="brand" href="#" data-action="home" aria-label="Remento current milestone"><span class="brand-mark">r</span><span>remento</span></a><div class="header-right">${attendee ? '<button class="keepsakes-nav" data-action="keepsakes">My keepsakes</button>' : '<span class="local-badge"><i></i> Your little event book</span>'}</div></header>`;
 }
 
 function photoPreview(data: string, alt: string) {
@@ -152,12 +186,21 @@ function cueForNow() {
 }
 
 function homeScreen() {
-  const cue = cueForNow();
-  const cueMoment = eventInfo.moments.find((moment) => moment.id === cue);
-  const notice = cue ? `<aside class="nudge"><span class="nudge-spark">✳</span><div><strong>${cue === 'near-close' ? 'The event is wrapping up.' : `${escapeHtml(cueMoment?.label)} is still waiting.`}</strong><p>${cue === 'near-close' ? 'Save anything you want to remember.' : 'A small moment is enough.'}</p></div><button data-action="${cue === 'near-close' ? 'home' : cue}" class="nudge-open">${cue === 'near-close' ? 'Take a look' : 'Open'} →</button><button class="dismiss" data-action="dismiss-nudge" aria-label="Dismiss reminder">×</button></aside>` : '';
-  return `${header()}<main class="shell home-shell"><section class="event-heading"><div class="overline"><span class="live-dot"></span> THE EVENT IS ON</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} <span>·</span> ${eventTimeRange()} <span>·</span> ${escapeHtml(eventInfo.place)}</p><div class="progress-row"><div><strong>${completeCount()} <span>of 4 saved</span></strong><span class="private-note">Only on this phone</span></div><div class="progress-track"><span style="transform:scaleX(${completeCount() / 4})"></span></div></div></section>
-    ${notice}<section class="moment-list" aria-label="Your four moments">${momentRow('arrival', 0, eventInfo.moments[0].label, 'You’re here. Let the day begin.', '✳', 'home')}${momentRow('activity', 1, eventInfo.moments[1].label, 'Keep one little scene from today.', '▧', 'activity')}${momentRow('memory', 2, eventInfo.moments[2].label, 'Write one detail you’ll remember.', '♡', 'memory')}${momentRow('reconnect', 3, eventInfo.moments[3].label, 'Exchange a link when it feels right.', '↗', 'qr')}</section>
-    <section class="home-links"><button data-action="scan" class="quiet-link">Scan their QR <span>↗</span></button><button data-action="connections" class="quiet-link">My connections <span>${attendee?.connections.length ?? 0}</span></button></section>
+  if (!attendee) return joinScreen();
+  advanceMilestone();
+  const index = Math.min(attendee.milestone ?? 1, 4);
+  const items = [
+    { title: 'I made it', detail: 'You’re here. Let the day begin.', icon: '✳', action: 'home', complete: true },
+    { title: eventInfo.moments[1].label, detail: 'Keep one little scene from today.', icon: '▧', action: 'activity', complete: completed('activity') },
+    { title: eventInfo.moments[2].label, detail: 'Write one detail you’ll remember.', icon: '♡', action: 'memory', complete: completed('memory') },
+    { title: eventInfo.moments[3].label, detail: 'Exchange a link when it feels right.', icon: '↗', action: 'scan', complete: completed('reconnect') },
+  ];
+  const current = items[index] ?? null;
+  const showSavedStamp = savedStamp;
+  savedStamp = false;
+  return `${header()}<main class="shell home-shell"><section class="event-heading"><div class="overline"><span class="live-dot"></span> YOUR EVENT BOOK</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} <span>·</span> ${eventTimeRange()} <span>·</span> ${escapeHtml(eventInfo.place)}</p><div class="progress-row"><div><strong>${index} <span>of 4 moments</span></strong><span class="private-note">Only on this phone · ${escapeHtml(attendee.nickname)}</span></div><div class="progress-track" role="progressbar" aria-label="Milestone progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${index}"><span style="transform:scaleX(${index / 4})"></span></div></div></section>
+    ${showSavedStamp ? '<div class="saved-stamp" role="status"><span aria-hidden="true">✳</span> Moment saved to this phone</div>' : ''}${current ? `<section class="current-milestone" aria-labelledby="milestone-title"><div class="milestone-meta">MOMENT 0${index + 1} OF 04</div><div class="milestone-icon ${momentOrder[index]}">${current.icon}</div><h2 id="milestone-title">${escapeHtml(current.title)}</h2><p>${escapeHtml(current.detail)}</p>${index === 1 ? button('Choose a photo →', 'activity') : index === 2 ? button('Write a memory →', 'memory') : `<div class="button-row">${button('Scan someone’s QR →', 'scan')}${button('Set up my QR', 'qr', 'secondary')}</div>`}</section>` : `<section class="current-milestone all-done"><div class="milestone-icon arrival">✳</div><div class="milestone-meta">ALL FOUR MOMENTS KEPT</div><h2 id="milestone-title">That was your day.</h2><p>Your little event book is ready whenever you want to revisit it.</p>${button('See my private recap →', 'recap')}</section>`}
+    <section class="home-links"><span>Saved here, on this phone</span><span>${attendee.connections.length} connection${attendee.connections.length === 1 ? '' : 's'} · ${Number(Boolean(attendee.activityPhoto)) + Number(Boolean(attendee.memoryPhoto))} photos</span></section>
     ${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
@@ -180,12 +223,16 @@ function qrScreen() {
 }
 
 function scanScreen() {
-  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 04 / WITH PERMISSION</div><h1>Swap a way<br><em>back in touch.</em></h1><p class="intro">Ask if they’d like to share. We’ll show the links first. Nothing saves unless you confirm.</p><div class="scanner-panel"><div class="scan-frame"><span class="scan-corner top-left"></span><span class="scan-corner top-right"></span><span class="scan-corner bottom-left"></span><span class="scan-corner bottom-right"></span><div class="scan-symbol">▦</div></div><button class="button secondary button-wide" data-action="start-camera">${cameraStream ? 'Camera is ready — scan a QR' : 'Open camera to scan'}</button><p class="field-hint">Camera access starts only when you tap.</p><video id="camera-video" class="camera-video" playsinline muted ${cameraStream ? '' : 'hidden'}></video></div><details class="manual-entry"><summary>Enter a link instead</summary><form id="manual-link-form"><label for="manual-nickname">Their name or nickname</label><input id="manual-nickname" name="nickname" maxlength="32" placeholder="What should we call them?" required><label for="manual-links">Profile links (one per line)</label><textarea id="manual-links" name="links" rows="3" placeholder="https://…" required></textarea><button class="button secondary button-wide" type="submit">Preview links</button></form></details>${scannedConnection ? `<section class="consent-card"><div class="overline">CHECK BEFORE SAVING</div><h2>${escapeHtml(scannedConnection.nickname)}</h2><p>They chose to share these links with you:</p><ul>${scannedConnection.links.map((link) => `<li><strong>${escapeHtml(link.label)}</strong><span>${escapeHtml(host(link.url))}</span></li>`).join('')}</ul><div class="button-row">${button('Save connection', 'confirm-connection')}${button('No thanks', 'decline-connection', 'quiet-button')}</div></section>` : ''}${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 04 / WITH PERMISSION</div><h1>Swap a way<br><em>back in touch.</em></h1><p class="intro">Ask if they’d like to share. We’ll show the links first. Nothing saves unless you confirm.</p><div class="scanner-panel"><div class="scan-frame"><span class="scan-corner top-left"></span><span class="scan-corner top-right"></span><span class="scan-corner bottom-left"></span><span class="scan-corner bottom-right"></span><div class="scan-symbol">▦</div></div><button class="button secondary button-wide" data-action="start-camera">${cameraStream ? 'Camera is ready — scan a QR' : 'Open camera to scan'}</button><p class="field-hint">Camera access starts only when you tap.</p><video id="camera-video" class="camera-video" playsinline muted ${cameraStream ? '' : 'hidden'}></video></div><details class="manual-entry"><summary>Enter a link instead</summary><div class="manual-entry-content"><div class="manual-entry-inner"><form id="manual-link-form"><label for="manual-nickname">Their name or nickname</label><input id="manual-nickname" name="nickname" maxlength="32" placeholder="What should we call them?" required><label for="manual-links">Profile links (one per line)</label><textarea id="manual-links" name="links" rows="3" placeholder="https://…" required><\/textarea><button class="button secondary button-wide" type="submit">Preview links</button></form></div></div></details>${scannedConnection ? `<section class="consent-card"><div class="overline">CHECK BEFORE SAVING</div><h2>${escapeHtml(scannedConnection.nickname)}</h2><p>They chose to share these links with you:</p><ul>${scannedConnection.links.map((link) => `<li><strong>${escapeHtml(link.label)}</strong><span>${escapeHtml(host(link.url))}</span></li>`).join('')}</ul><div class="button-row">${button('Save connection', 'confirm-connection')}${button('No thanks', 'decline-connection', 'quiet-button')}</div></section>` : ''}${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function connectionsScreen() {
   const connections = attendee?.connections ?? [];
-  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">SAVED ON THIS PHONE</div><h1>People &<br><em>little reminders.</em></h1><p class="intro">Your saved connections are private to this browser. Links can be opened or copied here.</p>${connections.length ? `<div class="connection-list">${connections.map((contact, index) => `<article class="connection-card"><div class="connection-avatar">${escapeHtml((contact.nickname || '?').charAt(0).toUpperCase())}</div><div class="connection-main"><h2>${escapeHtml(contact.nickname)}</h2><p>${contact.links.map((link) => escapeHtml(host(link.url))).join(' · ')}</p><div class="connection-actions">${contact.links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} ↗</a>`).join('')}</div></div><button class="remove-contact" data-action="remove-connection" data-index="${index}" aria-label="Remove ${escapeHtml(contact.nickname)}">×</button></article>`).join('')}</div>` : '<div class="empty-state"><span>♡</span><h2>No connections saved yet</h2><p>When someone chooses to share their QR, the link stays here.</p></div>'}${button('Scan a QR', 'scan')}${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  const photos = [
+    ...(attendee?.activityPhoto ? [{ key: 'activity', label: 'A scene from today', src: attendee.activityPhoto }] : []),
+    ...(attendee?.memoryPhoto ? [{ key: 'memory', label: 'Someone you met', src: attendee.memoryPhoto }] : []),
+  ];
+  return `${header()}<main class="shell form-shell keepsakes-shell"><div class="form-kicker">SAVED ON THIS PHONE</div><h1>My<br><em>keepsakes.</em></h1><p class="intro">Photos and consensual connections stay private in this browser. They will be here as you move through the moments.</p><section class="keepsake-section"><h2>Photos <span>${photos.length}</span></h2>${photos.length ? `<div class="keepsake-photos">${photos.map((photo) => `<article class="keepsake-photo"><img src="${photo.src}" alt="${escapeHtml(photo.label)}"><div><strong>${escapeHtml(photo.label)}</strong><button data-action="remove-${photo.key}-photo" class="text-button">Remove photo</button></div></article>`).join('')}</div>` : '<p class="keepsake-empty">Photos you save during the event will appear here.</p>'}</section><section class="keepsake-section"><h2>Connections <span>${connections.length}</span></h2>${connections.length ? `<div class="connection-list">${connections.map((contact, index) => `<article class="connection-card"><div class="connection-avatar">${escapeHtml((contact.nickname || '?').charAt(0).toUpperCase())}</div><div class="connection-main"><h3>${escapeHtml(contact.nickname)}</h3><p>${contact.links.map((link) => escapeHtml(host(link.url))).join(' &middot; ')}</p><div class="connection-actions">${contact.links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} &#8599;</a>`).join('')}</div></div><button class="remove-contact" data-action="remove-connection" data-index="${index}" aria-label="Remove ${escapeHtml(contact.nickname)}">&#215;</button></article>`).join('')}</div>` : '<p class="keepsake-empty">When someone chooses to share their QR, the link stays here.</p>'}<div class="button-row">${button('Scan a QR', 'scan')}${button('Share my QR', 'qr', 'secondary')}</div></section><button data-action="home" class="text-button keepsakes-return">&#8592; Continue your current moment</button>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function recapSlides(): string[] {
@@ -195,13 +242,15 @@ function recapSlides(): string[] {
     `<div class="story-moment story-photo-moment">${attendee?.activityPhoto ? `<img src="${attendee.activityPhoto}" alt="Activity moment saved by you">` : '<div class="story-empty-art">▧</div>'}<div class="story-index">02 / A SCENE FROM TODAY</div><div class="story-tag">${attendee?.activityPhoto ? 'A LITTLE PIECE OF THE DAY' : 'A MOMENT LEFT OPEN'}</div><h2>${attendee?.activityPhoto ? 'Look what you kept.' : 'Some moments stay in the moment.'}</h2><p>${attendee?.activityPhoto ? 'Your snapshot is waiting in your event book.' : 'No photo saved. That’s okay; the day was yours either way.'}</p></div>`,
     `<div class="story-moment story-note-moment"><div class="story-index">03 / SOMEONE YOU MET</div><div class="story-icon memory">♡</div><div class="story-tag">A NOTE TO YOURSELF</div><h2>${attendee?.memory || attendee?.memoryPhoto ? 'A detail worth keeping.' : 'A story can have open pages.'}</h2>${attendee?.memory ? `<blockquote>${escapeHtml(attendee.memory)}</blockquote>` : '<p>No note saved. You can still keep the rest of the day.</p>'}${attendee?.memoryPhoto ? photoPreview(attendee.memoryPhoto, 'Optional photo saved in your private memory') : ''}<span class="private-note">Only on this phone</span></div>`,
     `<div class="story-moment"><div class="story-index">04 / A WAY BACK</div><div class="story-icon reconnect">↗</div><div class="story-tag">A LITTLE DOOR LEFT OPEN</div><h2>${attendee?.connections.length ? 'A new way to say hello.' : 'Some exchanges can wait.'}</h2><p>${attendee?.connections.length ? `You saved ${attendee.connections.length} consensual connection${attendee.connections.length === 1 ? '' : 's'}.` : 'No links exchanged. There’s no wrong way to meet someone.'}</p><div class="story-foot">Your contact details stay on this phone.</div></div>`,
-    `<div class="story-ending"><div class="ending-flower">✳</div><div class="story-tag">THAT WAS YOUR DAY</div><h2>Keep what<br>you want.<br><em>Let the rest go.</em></h2><p>This little book is yours to revisit.</p><button class="button primary" data-action="export">Make a shareable summary →</button><button class="text-button" data-action="connections">See my connections</button></div>`,
+    `<div class="story-ending"><div class="ending-flower">✳</div><div class="story-tag">THAT WAS YOUR DAY</div><h2>Keep what<br>you want.<br><em>Let the rest go.</em></h2><p>This little book is yours to revisit.</p><button class="button primary" data-action="export">Make a shareable summary →</button><button class="text-button" data-action="keepsakes">See my keepsakes</button></div>`,
   ];
 }
 
 function recapScreen() {
   const slides = recapSlides();
-  return `${header()}<main class="shell recap-shell"><div class="recap-topline"><span class="overline">YOUR PRIVATE RECAP</span><span class="story-count">${recapIndex + 1} / ${slides.length}</span></div><section class="story-card" aria-live="polite">${slides[recapIndex]}</section><div class="story-progress">${slides.map((_, index) => `<span class="${index <= recapIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-controls"><button class="button secondary" data-action="previous-story" ${recapIndex === 0 ? 'disabled' : ''}>← Previous</button><button class="button primary" data-action="next-story">${recapIndex === slides.length - 1 ? 'Make a summary' : 'Next →'}</button></div>${button('My connections', 'connections', 'quiet-button centered-button')}</main>${footer()}`;
+  const direction = recapMotion;
+  recapMotion = 0;
+  return `${header()}<main class="shell recap-shell"><div class="recap-topline"><span class="overline">YOUR PRIVATE RECAP</span><span class="story-count">${recapIndex + 1} / ${slides.length}</span></div><section class="story-card" aria-live="polite" ${direction ? `data-recap-direction="${direction > 0 ? 'next' : 'previous'}"` : ''}>${slides[recapIndex]}</section><div class="story-progress">${slides.map((_, index) => `<span class="${index <= recapIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-controls"><button class="button secondary" data-action="previous-story" ${recapIndex === 0 ? 'disabled' : ''}>← Previous</button><button class="button primary" data-action="next-story">${recapIndex === slides.length - 1 ? 'Make a summary' : 'Next →'}</button></div>${button('My keepsakes', 'keepsakes', 'quiet-button centered-button')}</main>${footer()}`;
 }
 
 function exportScreen() {
@@ -211,7 +260,9 @@ function exportScreen() {
 function organizerScreen() {
   const organizerToken = new URLSearchParams(location.search).get('organize') || '';
   const attendeeUrl = `${location.origin}${location.pathname}?event=${eventKey}`;
-  return `${header()}<main class="shell organizer-shell"><div class="form-kicker">PRIVATE ORGANIZER VIEW</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} · ${eventTimeRange()} · ${escapeHtml(eventInfo.place)}</p><section class="organizer-stats"><span>IN-APP JOINS</span><strong>${status.joinCount}</strong><p>Distinct browser records, not total attendance.</p><button class="text-button" data-action="refresh-status">Refresh count ↻</button></section><div class="organizer-qr"><img src="${qrDataUrl}" alt="QR code that opens the attendee join page"><div><h2>Invite attendees</h2><p>Scan the QR or share this event link.</p><button class="text-button" data-action="copy-event-link">Copy attendee link</button></div></div>${status.closedAt ? `<div class="closed-banner"><span>✓</span><div><strong>Event closed</strong><p>${new Date(status.closedAt).toLocaleString()}</p></div></div>` : `<div class="close-box"><div><strong>Ready to close the event?</strong><p>Attendees will see their private recap. New joins will stop.</p></div><button class="button danger" data-action="close-event">Close event</button></div>`}<p class="privacy-hint">Organizer access comes from this private link. Do not share it with attendees.</p>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}<a class="text-button home-organizer" href="${attendeeUrl}">Open attendee view →</a></main>${footer()}`;
+  const countChanged = organizerCountChanged;
+  organizerCountChanged = false;
+  return `${header()}<main class="shell organizer-shell"><div class="form-kicker">PRIVATE ORGANIZER VIEW</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} · ${eventTimeRange()} · ${escapeHtml(eventInfo.place)}</p><section class="organizer-stats"><span>IN-APP JOINS</span><strong ${countChanged ? 'class="count-updated"' : ''}>${status.joinCount}</strong><p>Distinct browser records, not total attendance.</p><button class="text-button" data-action="refresh-status">Refresh count ↻</button></section><div class="organizer-qr"><img src="${qrDataUrl}" alt="QR code that opens the attendee join page"><div><h2>Invite attendees</h2><p>Scan the QR or share this event link.</p><button class="text-button" data-action="copy-event-link">Copy attendee link</button></div></div>${status.closedAt ? `<div class="closed-banner"><span>✓</span><div><strong>Event closed</strong><p>${new Date(status.closedAt).toLocaleString()}</p></div></div>` : `<div class="close-box"><div><strong>Ready to close the event?</strong><p>Attendees will see their private recap. New joins will stop.</p></div><button class="button danger" data-action="close-event">Close event</button></div>`}<p class="privacy-hint">Organizer access comes from this private link. Do not share it with attendees.</p>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}<a class="text-button home-organizer" href="${attendeeUrl}">Open attendee view →</a></main>${footer()}`;
 }
 
 function footer() {
@@ -222,29 +273,65 @@ function host(link: string) {
   try { return new URL(link).host.replace(/^www\./, ''); } catch { return link; }
 }
 
-function render() {
+function render(options: { navigation?: boolean; recapDirection?: number } = {}) {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const activeId = active?.id;
+  const activeAction = active?.dataset.action;
+  const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+    ? { start: active.selectionStart, end: active.selectionEnd }
+    : null;
+  if (options.recapDirection) recapMotion = options.recapDirection;
+  if (options.navigation) {
+    navigationMotion = true;
+    window.clearTimeout(navigationTimer);
+    navigationTimer = window.setTimeout(() => {
+      navigationMotion = false;
+      app.classList.remove('is-navigating');
+    }, 240);
+  }
   app.innerHTML = screen === 'join' ? joinScreen()
     : screen === 'home' ? homeScreen()
       : screen === 'activity' ? activityScreen()
         : screen === 'memory' ? memoryScreen()
           : screen === 'qr' ? qrScreen()
             : screen === 'scan' ? scanScreen()
-              : screen === 'connections' ? connectionsScreen()
+              : screen === 'keepsakes' ? connectionsScreen()
                 : screen === 'recap' ? recapScreen()
                   : screen === 'export' ? exportScreen()
                     : organizerScreen();
+  app.classList.toggle('is-navigating', navigationMotion);
+  app.style.setProperty('--screen-shift', options.navigation && screenOrder[screen] < screenOrder[previousScreen] ? '-8px' : '8px');
   bindEvents();
   setSwipeHandlers();
+  if (!options.navigation && active && app.contains(active) === false) {
+    const replacement = (activeId && document.getElementById(activeId))
+      || (activeAction && app.querySelector<HTMLElement>(`[data-action="${activeAction}"]`));
+    replacement?.focus({ preventScroll: true });
+    if (selection && (replacement instanceof HTMLInputElement || replacement instanceof HTMLTextAreaElement) && selection.start !== null && selection.end !== null) {
+      replacement.setSelectionRange(selection.start, selection.end);
+    }
+  } else if (options.navigation) {
+    app.querySelector<HTMLElement>('main h1, main h2')?.setAttribute('tabindex', '-1');
+    app.querySelector<HTMLElement>('main h1, main h2')?.focus({ preventScroll: true });
+  }
 }
 
+const screenOrder: Record<Screen, number> = { join: 0, home: 1, activity: 2, memory: 2, qr: 3, scan: 3, keepsakes: 4, recap: 5, export: 6, organizer: 0 };
+let previousScreen: Screen = screen;
+let navigationMotion = false;
+let navigationTimer = 0;
+
 function setScreen(next: Screen) {
+  if (next === screen) { render(); return; }
   stopCamera();
   errorMessage = '';
+  if (next !== 'home') savedStamp = false;
+  previousScreen = screen;
   if (next === 'recap') recapIndex = 0;
   screen = next;
   if (screen === 'qr') void updateQr();
   if (screen === 'organizer') void prepareOrganizer();
-  render();
+  render({ navigation: true });
 }
 
 async function api<T>(action: string, method: 'GET' | 'POST' = 'GET', body?: unknown, token = ''): Promise<T> {
@@ -261,8 +348,10 @@ async function api<T>(action: string, method: 'GET' | 'POST' = 'GET', body?: unk
 async function refreshStatus() {
   try {
     const previousClosedAt = status.closedAt;
+    const previousJoinCount = status.joinCount;
     status = await api<Status>('status');
     eventInfo = status.event;
+    organizerCountChanged = previousJoinCount !== status.joinCount;
     if (attendee && status.closedAt && screen !== 'recap' && screen !== 'export' && screen !== 'organizer') setScreen('recap');
     else if (screen === 'organizer' || (screen === 'join' && previousClosedAt !== status.closedAt)) render();
   } catch (error) {
@@ -274,7 +363,7 @@ async function refreshStatus() {
 async function updateQr() {
   try {
     const links = attendee?.links ?? [];
-    if (!links.length) { qrDataUrl = ''; render(); return; }
+    if (!links.length) { qrDataUrl = ''; return; }
     qrDataUrl = await QRCode.toDataURL(JSON.stringify({ type: 'remento-social', nickname: attendee?.nickname, links }), { width: 240, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#172321', light: '#fffdf8' } });
     if (screen === 'qr') render();
   } catch {
@@ -343,28 +432,37 @@ function bindEvents() {
       const target = event.currentTarget as HTMLElement;
       const action = target.dataset.action;
       if (!action) return;
-      if (['activity', 'memory', 'qr', 'scan', 'connections', 'home', 'recap', 'export'].includes(action)) { setScreen(action as Screen); return; }
+      if (action === 'keepsakes' || action === 'connections') { setScreen('keepsakes'); return; }
+      if (['activity', 'memory', 'qr', 'scan', 'home', 'recap', 'export'].includes(action)) {
+        const current = attendee?.milestone ?? 0;
+        if ((action === 'activity' && current !== 1) || (action === 'memory' && current !== 2) || (['qr', 'scan'].includes(action) && current < 3 && screen !== 'keepsakes')) return;
+        setScreen(action as Screen); return;
+      }
       if (action === 'back') { setScreen('home'); return; }
       if (action === 'replace-activity') { activityDraft = ''; setScreen('activity'); return; }
       if (action === 'save-activity') {
         if (!attendee || !activityDraft) return;
         attendee.activityPhoto = activityDraft;
-        if (saveLocal()) { activityDraft = ''; setScreen('home'); }
+        advanceMilestone();
+        if (saveLocal()) { activityDraft = ''; savedStamp = true; setScreen('home'); }
         else render();
       }
       if (action === 'delete-activity' && attendee && confirm('Delete this activity photo from this phone?')) { attendee.activityPhoto = ''; saveLocal(); setScreen('home'); }
+      if (action === 'remove-activity-photo' && attendee && confirm('Remove this activity photo from your keepsakes?')) { attendee.activityPhoto = ''; if (saveLocal()) render(); }
       if (action === 'delete-memory-photo' && attendee && confirm('Remove this optional photo? Your text note will stay.')) { attendee.memoryPhoto = ''; saveLocal(); setScreen('memory'); }
+      if (action === 'remove-memory-photo' && attendee && confirm('Remove this optional photo from your keepsakes?')) { attendee.memoryPhoto = ''; if (saveLocal()) render(); }
       if (action === 'remove-link' && attendee) { attendee.links = attendee.links.filter((link) => link.url !== target.dataset.url); saveLocal(); void updateQr(); }
       if (action === 'confirm-connection' && attendee && scannedConnection) {
         attendee.connections = [...attendee.connections, { ...scannedConnection, savedAt: new Date().toISOString() }];
-        if (saveLocal()) { scannedConnection = null; setScreen('home'); }
+        advanceMilestone();
+        if (saveLocal()) { scannedConnection = null; savedStamp = true; setScreen('home'); }
         else render();
       }
       if (action === 'decline-connection') { scannedConnection = null; setScreen('home'); }
       if (action === 'remove-connection' && attendee && confirm('Remove this saved connection from this phone?')) { attendee.connections.splice(Number(target.dataset.index), 1); saveLocal(); render(); }
       if (action === 'dismiss-nudge' && attendee) { const cue = cueForNow(); if (cue) attendee.dismissedCues.push(cue); saveLocal(); render(); }
-      if (action === 'previous-story') { recapIndex = Math.max(0, recapIndex - 1); render(); }
-      if (action === 'next-story') { if (recapIndex === recapSlides().length - 1) setScreen('export'); else { recapIndex++; render(); } }
+      if (action === 'previous-story') { const nextIndex = Math.max(0, recapIndex - 1); if (nextIndex !== recapIndex) { recapIndex = nextIndex; render({ recapDirection: -1 }); } }
+      if (action === 'next-story') { if (recapIndex === recapSlides().length - 1) setScreen('export'); else { recapIndex++; render({ recapDirection: 1 }); } }
       if (action === 'create-export' || action === 'download-export') void buildExport(action === 'download-export');
       if (action === 'copy-event-link') void copyText(`${location.origin}${location.pathname}?event=${eventKey}`);
       if (action === 'refresh-status') void refreshStatus();
@@ -380,9 +478,11 @@ function bindEvents() {
     if (!nickname) return;
     try {
       await api('join', 'POST', { deviceId: getDeviceId() });
-      attendee = attendee ?? { nickname, joinedAt: new Date().toISOString(), activityPhoto: '', memory: '', memoryPhoto: '', links: [], connections: [], dismissedCues: [] };
+      attendee = attendee ?? { nickname, joinedAt: new Date().toISOString(), activityPhoto: '', memory: '', memoryPhoto: '', links: [], connections: [], dismissedCues: [], milestone: 1 };
       attendee.nickname = nickname;
       attendee.joinedAt ||= new Date().toISOString();
+      attendee.milestone = Math.max(attendee.milestone ?? 0, 1);
+      advanceMilestone();
       if (!saveLocal()) { render(); return; }
       await refreshStatus();
       setScreen(status.closedAt ? 'recap' : 'home');
@@ -413,7 +513,8 @@ function bindEvents() {
     if (attendee) {
       attendee.memory = memory;
       if (memoryPhotoDraft) attendee.memoryPhoto = memoryPhotoDraft;
-      if (saveLocal()) { memoryPhotoDraft = ''; memoryDraft = ''; setScreen('home'); } else render();
+      advanceMilestone();
+      if (saveLocal()) { memoryPhotoDraft = ''; memoryDraft = ''; savedStamp = true; setScreen('home'); } else render();
     }
   });
 
@@ -561,8 +662,10 @@ function setSwipeHandlers() {
   card.addEventListener('touchend', (event) => {
     const difference = event.changedTouches[0].clientX - startX;
     if (Math.abs(difference) < 55) return;
-    recapIndex = Math.max(0, Math.min(recapSlides().length - 1, recapIndex + (difference < 0 ? 1 : -1)));
-    render();
+    const nextIndex = Math.max(0, Math.min(recapSlides().length - 1, recapIndex + (difference < 0 ? 1 : -1)));
+    if (nextIndex === recapIndex) return;
+    recapIndex = nextIndex;
+    render({ recapDirection: difference < 0 ? 1 : -1 });
   }, { passive: true });
 }
 

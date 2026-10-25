@@ -5,10 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f4ec" />
     <meta name="description" content="A pocket scrapbook for the people and moments you meet at campus events." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Remento — keep the moments</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main class="boot-splash" aria-label="Loading Remento">
+        <img src="/splash.svg" alt="" width="168" height="168" />
+        <span class="boot-wordmark">remento</span>
+        <span class="boot-caption">a little event book</span>
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

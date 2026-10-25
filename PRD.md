@@ -1,6 +1,6 @@
 # REmento — candidate product requirements
 
-**Status:** Selected Stage 1 hackathon prototype; implementation is complete and the public app is deployed, with Redis-backed event actions and two-phone verification pending. **Working name:** Remento; [Remento](https://www.remento.co/) already uses a very similar name for a memory product, so public naming needs a separate check. **Audience:** Students attending small campus events, with a student organizer setting up the event. **First surface:** Mobile web for two phones. See [RESEARCH.md](RESEARCH.md) for the evidence and alternatives and [REMENTO-DESIGN.md](REMENTO-DESIGN.md) for screen behavior. Local demand remains untested. The reusable process remains in [DESIGN.md](DESIGN.md).
+**Status:** Selected Stage 1 hackathon prototype; implementation is complete. Local Redis connectivity is verified, while Vercel production configuration/deployment, live API behavior, and two-phone verification remain pending because Vercel API access failed during preflight. **Working name:** Remento; [Remento](https://www.remento.co/) already uses a very similar name for a memory product, so public naming needs a separate check. **Audience:** Students attending small campus events, with a student organizer setting up the event. **First surface:** Mobile web for two phones. See [RESEARCH.md](RESEARCH.md) for the evidence and alternatives and [REMENTO-DESIGN.md](REMENTO-DESIGN.md) for screen behavior. Local demand remains untested. The reusable process remains in [DESIGN.md](DESIGN.md).
 
 ## 30-second pitch
 

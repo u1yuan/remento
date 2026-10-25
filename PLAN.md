@@ -3,7 +3,7 @@ A previous agent produced the plan below to accomplish the user's task. Implemen
 
 # Build Remento for submission
 
-**Progress:** The Stage 1 app is deployed at `https://remento.vercel.app/`; production build and TypeScript checks pass. The event API returns `503` until Upstash Redis variables are configured, and the two-phone acceptance run remains pending; see [SETUP.md](SETUP.md).
+**Progress:** The Stage 1 app and Redis-backed API are implemented; the production build and TypeScript check pass. Local Redis connectivity is verified (HTTP 200), and the event close key is empty. Vercel CLI requests failed at the network layer, and the live production page/API could not be checked. Production Redis configuration and deployment, organizer-token rejection, and the two-phone acceptance run remain pending; see [SETUP.md](SETUP.md).
 
 ## Summary
 
@@ -24,4 +24,4 @@ Test join and QR exchange on two phones; refresh without a duplicate join; close
 
 ## Assumptions
 
-Vercel is available, as confirmed. The build needs a Vercel data store connection and deployment access. The existing Remento name is acceptable for this hackathon prototype; public branding can be revisited later.
+The project directory is linked to Vercel, but Vercel API access was unavailable from this environment during deployment preflight. The temporary Upstash database is claimed and reserved for Development and Preview; Production needs a separate durable database. The existing Remento name is acceptable for this hackathon prototype; public branding can be revisited later.
