@@ -3,6 +3,8 @@ A previous agent produced the plan below to accomplish the user's task. Implemen
 
 # Build Remento for submission
 
+**Progress:** The Stage 1 Vite app and Redis-backed API are implemented. Production build and TypeScript checks pass. Deployment and the two-phone acceptance run are pending Vercel GitHub sign-in and Upstash Redis credentials; see [SETUP.md](SETUP.md).
+
 ## Summary
 
 Build a mobile web prototype for the **Codex x UIAI Hackathon** fixture and deploy it to Vercel. The judging path is two attendees joining the same event, saving a memory and a consensual connection, then viewing private recaps after the organizer closes the event.

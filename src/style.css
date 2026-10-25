@@ -90,7 +90,7 @@ h1 em, .story-ending h2 em { color: var(--blue); font-weight: 500; }
 .ticket-stamp { display: grid; width: 57px; height: 57px; flex: 0 0 auto; place-content: center; transform: rotate(-5deg); background: #fae7ad; color: #755d1a; text-align: center; font-family: var(--mono); font-size: 8px; line-height: 1.6; }
 .ticket-stamp b { font-size: 10px; }
 .event-ticket h2 { margin: 5px 0 4px; font-size: 15px; }
-.event-ticket p { margin: 0; color: var(--muted); font-size: 11px; }
+.event-ticket p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .join-form, .memory-form { display: grid; gap: 10px; }
 .join-form > label, .memory-form > label, .manual-entry label, .link-form label { color: #333e38; font-size: 12px; font-weight: 700; }
 input:not([type=checkbox]):not([type=file]), textarea { width: 100%; padding: 13px 14px; border: 1px solid #d9d7ce; border-radius: 9px; background: #fffdf8; color: var(--ink); font-size: 14px; }
