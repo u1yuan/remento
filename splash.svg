@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 900" role="img" aria-labelledby="title desc">
+  <title id="title">Remento</title>
+  <desc id="desc">A cobalt scrapbook ticket under a golden sun, with the words a little event book.</desc>
+  <rect width="720" height="900" fill="#f7f4ec"/>
+  <circle cx="536" cy="300" r="164" fill="#f3c847"/>
+  <path d="M130 603c91-51 165-61 267-20" fill="none" stroke="#eb795e" stroke-width="7" stroke-linecap="round"/>
+  <g transform="rotate(-7 350 432)">
+    <rect x="207" y="285" width="306" height="294" rx="24" fill="#2856e8"/>
+    <path d="M360 359h-33v38c-10-13-25-20-45-20-39 0-66 30-66 73 0 44 27 75 66 75 21 0 37-8 47-23v19h32V359zm-70 139c-22 0-37-19-37-47 0-27 15-46 37-46 23 0 38 19 38 46 0 28-15 47-38 47z" fill="#fffdf8"/>
+    <circle cx="468" cy="318" r="14" fill="#eb795e"/>
+  </g>
+  <text x="360" y="700" fill="#172321" font-family="Georgia,serif" font-size="56" font-weight="700" text-anchor="middle">remento</text>
+  <text x="360" y="751" fill="#68716a" font-family="Arial,sans-serif" font-size="22" letter-spacing="4" text-anchor="middle">A LITTLE EVENT BOOK</text>
+  <text x="360" y="815" fill="#2856e8" font-family="Georgia,serif" font-size="34" text-anchor="middle">✳</text>
+</svg>

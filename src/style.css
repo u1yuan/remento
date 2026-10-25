@@ -31,6 +31,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 button:disabled { cursor: not-allowed; opacity: .48; }
 
 .site-header { max-width: 1140px; height: 84px; margin: 0 auto; padding: 0 34px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(23, 35, 33, .11); }
+.boot-splash { display: grid; min-height: 100svh; align-content: center; justify-items: center; padding: 36px; background: #f7f4ec; }
+.boot-splash img { width: min(168px, 42vw); height: auto; }
+.boot-wordmark { margin-top: 14px; color: var(--ink); font-family: var(--serif); font-size: 29px; font-weight: 700; letter-spacing: -.7px; }
+.boot-caption { margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-size: 20px; font-weight: 700; letter-spacing: -.8px; }
 .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; color: white; background: var(--blue); border-radius: 10px 10px 10px 3px; font-family: var(--serif); font-size: 23px; font-weight: 600; }
 .header-right { display: flex; align-items: center; gap: 16px; }
@@ -104,7 +108,7 @@ h1 em, .story-ending h2 em { color: var(--blue); font-weight: 500; }
 .site-footer b { color: var(--blue); font-size: 13px; }
 
 /* State changes: restrained, scrapbook-like, and limited to transform/opacity. */
-#app.is-navigating > main { animation: screen-enter 200ms var(--ease-out) both; }
+.screen-enter { animation: screen-enter 200ms var(--ease-out) both; }
 @keyframes screen-enter {
   from { opacity: 0; transform: translateY(var(--screen-shift, 8px)); }
   to { opacity: 1; transform: translateY(0); }
@@ -262,7 +266,7 @@ textarea { resize: vertical; line-height: 1.6; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #app.is-navigating > main { animation: screen-enter-reduced 120ms ease-out both; }
+  .screen-enter { animation: screen-enter-reduced 120ms ease-out both; }
   @keyframes screen-enter-reduced { from { opacity: .65; transform: none; } to { opacity: 1; transform: none; } }
   .story-card[data-recap-direction] > * { transition: opacity 100ms ease-out; transform: none; }
   .saved-stamp, .photo-preview, .qr-preview, .consent-card, .keepsake-photo, .connection-card, .closed-banner, .nudge, .export-preview > img { transition: opacity 120ms ease-out; transform: none; }

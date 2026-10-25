@@ -281,14 +281,6 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
     ? { start: active.selectionStart, end: active.selectionEnd }
     : null;
   if (options.recapDirection) recapMotion = options.recapDirection;
-  if (options.navigation) {
-    navigationMotion = true;
-    window.clearTimeout(navigationTimer);
-    navigationTimer = window.setTimeout(() => {
-      navigationMotion = false;
-      app.classList.remove('is-navigating');
-    }, 240);
-  }
   app.innerHTML = screen === 'join' ? joinScreen()
     : screen === 'home' ? homeScreen()
       : screen === 'activity' ? activityScreen()
@@ -299,8 +291,11 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
                 : screen === 'recap' ? recapScreen()
                   : screen === 'export' ? exportScreen()
                     : organizerScreen();
-  app.classList.toggle('is-navigating', navigationMotion);
-  app.style.setProperty('--screen-shift', options.navigation && screenOrder[screen] < screenOrder[previousScreen] ? '-8px' : '8px');
+  if (options.navigation) {
+    const main = app.querySelector<HTMLElement>('main');
+    main?.classList.add('screen-enter');
+    main?.style.setProperty('--screen-shift', screenOrder[screen] < screenOrder[previousScreen] ? '-8px' : '8px');
+  }
   bindEvents();
   setSwipeHandlers();
   if (!options.navigation && active && app.contains(active) === false) {
@@ -318,8 +313,6 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
 
 const screenOrder: Record<Screen, number> = { join: 0, home: 1, activity: 2, memory: 2, qr: 3, scan: 3, keepsakes: 4, recap: 5, export: 6, organizer: 0 };
 let previousScreen: Screen = screen;
-let navigationMotion = false;
-let navigationTimer = 0;
 
 function setScreen(next: Screen) {
   if (next === screen) { render(); return; }

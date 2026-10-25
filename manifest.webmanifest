@@ -1,0 +1,17 @@
+{
+  "name": "Remento — a little event book",
+  "short_name": "Remento",
+  "description": "A pocket scrapbook for the people and moments you meet at campus events.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f7f4ec",
+  "theme_color": "#f7f4ec",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.svg",
+      "sizes": "180x180",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
