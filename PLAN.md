@@ -3,7 +3,7 @@ A previous agent produced the plan below to accomplish the user's task. Implemen
 
 # Build Remento for submission
 
-**Progress:** The Stage 1 Vite app and Redis-backed API are implemented. Production build and TypeScript checks pass. Deployment and the two-phone acceptance run are pending Vercel GitHub sign-in and Upstash Redis credentials; see [SETUP.md](SETUP.md).
+**Progress:** The Stage 1 app is deployed at `https://remento.vercel.app/`; production build and TypeScript checks pass. The event API returns `503` until Upstash Redis variables are configured, and the two-phone acceptance run remains pending; see [SETUP.md](SETUP.md).
 
 ## Summary
 

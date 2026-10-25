@@ -1,6 +1,6 @@
 # REmento — candidate event design brief
 
-**Status:** Selected Stage 1 prototype brief; implementation is in progress. Follow the reusable steps in [DESIGN.md](DESIGN.md). The audience is a student at a small campus event who wants to remember one person and how to reconnect. The organizer supplies a short shared event frame; the attendee owns their memory and contact data on their phone. Local demand remains unvalidated.
+**Status:** Selected Stage 1 prototype brief; the app is deployed, with Redis-backed event actions and device checks pending. Follow the reusable steps in [DESIGN.md](DESIGN.md). The audience is a student at a small campus event who wants to remember one person and how to reconnect. The organizer supplies a short shared event frame; the attendee owns their memory and contact data on their phone. Local demand remains unvalidated.
 
 ## Design question and success condition
 
