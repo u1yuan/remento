@@ -196,10 +196,14 @@ function homeScreen() {
     { title: eventInfo.moments[3].label, detail: 'Exchange a link when it feels right.', icon: '↗', action: 'scan', complete: completed('reconnect') },
   ];
   const current = items[index] ?? null;
+  const cue = cueForNow();
+  nudge = cue;
+  const cueMoment = eventInfo.moments.find((moment) => moment.id === cue);
+  const notice = cue ? `<aside class="nudge"><span class="nudge-spark" aria-hidden="true">✳</span><div><strong>${cue === 'near-close' ? 'The event is wrapping up.' : `${escapeHtml(cueMoment?.label)} is still waiting.`}</strong><p>${cue === 'near-close' ? 'Save anything you want to remember.' : 'A small moment is enough.'}</p></div><button data-action="${cue === 'near-close' ? 'home' : cue}" class="nudge-open">${cue === 'near-close' ? 'Take a look' : 'Open'} →</button><button class="dismiss" data-action="dismiss-nudge" aria-label="Dismiss reminder">×</button></aside>` : '';
   const showSavedStamp = savedStamp;
   savedStamp = false;
   return `${header()}<main class="shell home-shell"><section class="event-heading"><div class="overline"><span class="live-dot"></span> YOUR EVENT BOOK</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} <span>·</span> ${eventTimeRange()} <span>·</span> ${escapeHtml(eventInfo.place)}</p><div class="progress-row"><div><strong>${index} <span>of 4 moments</span></strong><span class="private-note">Only on this phone · ${escapeHtml(attendee.nickname)}</span></div><div class="progress-track" role="progressbar" aria-label="Milestone progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${index}"><span style="transform:scaleX(${index / 4})"></span></div></div></section>
-    ${showSavedStamp ? '<div class="saved-stamp" role="status"><span aria-hidden="true">✳</span> Moment saved to this phone</div>' : ''}${current ? `<section class="current-milestone" aria-labelledby="milestone-title"><div class="milestone-meta">MOMENT 0${index + 1} OF 04</div><div class="milestone-icon ${momentOrder[index]}">${current.icon}</div><h2 id="milestone-title">${escapeHtml(current.title)}</h2><p>${escapeHtml(current.detail)}</p>${index === 1 ? button('Choose a photo →', 'activity') : index === 2 ? button('Write a memory →', 'memory') : `<div class="button-row">${button('Scan someone’s QR →', 'scan')}${button('Set up my QR', 'qr', 'secondary')}</div>`}</section>` : `<section class="current-milestone all-done"><div class="milestone-icon arrival">✳</div><div class="milestone-meta">ALL FOUR MOMENTS KEPT</div><h2 id="milestone-title">That was your day.</h2><p>Your little event book is ready whenever you want to revisit it.</p>${button('See my private recap →', 'recap')}</section>`}
+    ${notice}${showSavedStamp ? '<div class="saved-stamp" role="status"><span aria-hidden="true">✳</span> Moment saved to this phone</div>' : ''}${current ? `<section class="current-milestone" aria-labelledby="milestone-title"><div class="milestone-meta">MOMENT 0${index + 1} OF 04</div><div class="milestone-icon ${momentOrder[index]}">${current.icon}</div><h2 id="milestone-title">${escapeHtml(current.title)}</h2><p>${escapeHtml(current.detail)}</p>${index === 1 ? button('Choose a photo →', 'activity') : index === 2 ? button('Write a memory →', 'memory') : `<div class="button-row">${button('Scan someone’s QR →', 'scan')}${button('Set up my QR', 'qr', 'secondary')}</div>`}</section>` : `<section class="current-milestone all-done"><div class="milestone-icon arrival">✳</div><div class="milestone-meta">ALL FOUR MOMENTS KEPT</div><h2 id="milestone-title">That was your day.</h2><p>Your little event book is ready whenever you want to revisit it.</p>${button('See my private recap →', 'recap')}</section>`}
     <section class="home-links"><span>Saved here, on this phone</span><span>${attendee.connections.length} connection${attendee.connections.length === 1 ? '' : 's'} · ${Number(Boolean(attendee.activityPhoto)) + Number(Boolean(attendee.memoryPhoto))} photos</span></section>
     ${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
@@ -320,7 +324,7 @@ function setScreen(next: Screen) {
   errorMessage = '';
   if (next !== 'home') savedStamp = false;
   previousScreen = screen;
-  if (next === 'recap') recapIndex = 0;
+  if (next === 'recap') { recapIndex = 0; recapMotion = 1; }
   screen = next;
   if (screen === 'qr') void updateQr();
   if (screen === 'organizer') void prepareOrganizer();
@@ -344,7 +348,7 @@ async function refreshStatus() {
     const previousJoinCount = status.joinCount;
     status = await api<Status>('status');
     eventInfo = status.event;
-    organizerCountChanged = previousJoinCount !== status.joinCount;
+    organizerCountChanged = screen === 'organizer' && previousJoinCount !== status.joinCount;
     if (attendee && status.closedAt && screen !== 'recap' && screen !== 'export' && screen !== 'organizer') setScreen('recap');
     else if (screen === 'organizer' || (screen === 'join' && previousClosedAt !== status.closedAt)) render();
   } catch (error) {
@@ -419,6 +423,20 @@ function showConnectionPreview(connection: { nickname: string; links: SocialLink
   document.querySelector('.consent-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+function removeWithMotion(element: HTMLElement, finishAction: () => void) {
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    finishAction();
+  };
+  element.classList.add('is-removing');
+  element.addEventListener('transitionend', (event) => {
+    if (event.target === element && event.propertyName === 'opacity') finish();
+  });
+  window.setTimeout(finish, 190);
+}
+
 function bindEvents() {
   document.querySelectorAll<HTMLElement>('[data-action]').forEach((element) => {
     element.addEventListener('click', (event) => {
@@ -441,9 +459,15 @@ function bindEvents() {
         else render();
       }
       if (action === 'delete-activity' && attendee && confirm('Delete this activity photo from this phone?')) { attendee.activityPhoto = ''; saveLocal(); setScreen('home'); }
-      if (action === 'remove-activity-photo' && attendee && confirm('Remove this activity photo from your keepsakes?')) { attendee.activityPhoto = ''; if (saveLocal()) render(); }
+      if (action === 'remove-activity-photo' && attendee && confirm('Remove this activity photo from your keepsakes?')) {
+        const card = target.closest<HTMLElement>('.keepsake-photo');
+        if (card) removeWithMotion(card, () => { attendee!.activityPhoto = ''; if (saveLocal()) render(); });
+      }
       if (action === 'delete-memory-photo' && attendee && confirm('Remove this optional photo? Your text note will stay.')) { attendee.memoryPhoto = ''; saveLocal(); setScreen('memory'); }
-      if (action === 'remove-memory-photo' && attendee && confirm('Remove this optional photo from your keepsakes?')) { attendee.memoryPhoto = ''; if (saveLocal()) render(); }
+      if (action === 'remove-memory-photo' && attendee && confirm('Remove this optional photo from your keepsakes?')) {
+        const card = target.closest<HTMLElement>('.keepsake-photo');
+        if (card) removeWithMotion(card, () => { attendee!.memoryPhoto = ''; if (saveLocal()) render(); });
+      }
       if (action === 'remove-link' && attendee) { attendee.links = attendee.links.filter((link) => link.url !== target.dataset.url); saveLocal(); void updateQr(); }
       if (action === 'confirm-connection' && attendee && scannedConnection) {
         attendee.connections = [...attendee.connections, { ...scannedConnection, savedAt: new Date().toISOString() }];
@@ -452,7 +476,10 @@ function bindEvents() {
         else render();
       }
       if (action === 'decline-connection') { scannedConnection = null; setScreen('home'); }
-      if (action === 'remove-connection' && attendee && confirm('Remove this saved connection from this phone?')) { attendee.connections.splice(Number(target.dataset.index), 1); saveLocal(); render(); }
+      if (action === 'remove-connection' && attendee && confirm('Remove this saved connection from this phone?')) {
+        const card = target.closest<HTMLElement>('.connection-card');
+        if (card) removeWithMotion(card, () => { attendee!.connections.splice(Number(target.dataset.index), 1); saveLocal(); render(); });
+      }
       if (action === 'dismiss-nudge' && attendee) { const cue = cueForNow(); if (cue) attendee.dismissedCues.push(cue); saveLocal(); render(); }
       if (action === 'previous-story') { const nextIndex = Math.max(0, recapIndex - 1); if (nextIndex !== recapIndex) { recapIndex = nextIndex; render({ recapDirection: -1 }); } }
       if (action === 'next-story') { if (recapIndex === recapSlides().length - 1) setScreen('export'); else { recapIndex++; render({ recapDirection: 1 }); } }
