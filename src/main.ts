@@ -116,6 +116,24 @@ function completeCount() {
   return (['arrival', 'activity', 'memory', 'reconnect'] as MomentId[]).filter(completed).length;
 }
 
+function savedPersonalCategories() {
+  return {
+    activity: Boolean(attendee?.activityPhoto),
+    memory: Boolean(attendee?.memory.trim() || attendee?.memoryPhoto),
+    connection: Boolean(attendee?.connections.some((connection) => connection.links.length > 0)),
+  };
+}
+
+function participantType() {
+  const categories = savedPersonalCategories();
+  const count = Object.values(categories).filter(Boolean).length;
+  if (count > 1) return 'All-Rounder';
+  if (categories.activity) return 'Scene Catcher';
+  if (categories.memory) return 'Detail Keeper';
+  if (categories.connection) return 'Connector';
+  return '';
+}
+
 const momentOrder: MomentId[] = ['arrival', 'activity', 'memory', 'reconnect'];
 
 function legacyMilestone() {
@@ -240,14 +258,28 @@ function connectionsScreen() {
 }
 
 function recapSlides(): string[] {
-  return [
-    `<div class="story-cover"><div class="story-sun"></div><div class="story-cover-label">A DAY TO KEEP</div><h1>${escapeHtml(eventInfo.name)}</h1><p>${escapeHtml(eventInfo.dateLabel)} · ${escapeHtml(eventInfo.place)}</p><span class="story-sticker">${completeCount()} / 4<br><b>MOMENTS</b></span><div class="cover-scribble">Your day,<br>your little<br>keepsake.</div></div>`,
-    `<div class="story-moment"><div class="story-index">01 / ARRIVAL</div><div class="story-icon arrival">✳</div><div class="story-tag">FIRST THINGS FIRST</div><h2>${escapeHtml(attendee?.nickname)},<br>you made it.</h2><p>Every good story starts somewhere. This one started right here.</p><div class="story-foot">${escapeHtml(eventInfo.place)} · ${escapeHtml(eventInfo.dateLabel)}</div></div>`,
-    `<div class="story-moment story-photo-moment">${attendee?.activityPhoto ? `<img src="${attendee.activityPhoto}" alt="Activity moment saved by you">` : '<div class="story-empty-art">▧</div>'}<div class="story-index">02 / A SCENE FROM TODAY</div><div class="story-tag">${attendee?.activityPhoto ? 'A LITTLE PIECE OF THE DAY' : 'A MOMENT LEFT OPEN'}</div><h2>${attendee?.activityPhoto ? 'Look what you kept.' : 'Some moments stay in the moment.'}</h2><p>${attendee?.activityPhoto ? 'Your snapshot is waiting in your event book.' : 'No photo saved. That’s okay; the day was yours either way.'}</p></div>`,
-    `<div class="story-moment story-note-moment"><div class="story-index">03 / SOMEONE YOU MET</div><div class="story-icon memory">♡</div><div class="story-tag">A NOTE TO YOURSELF</div><h2>${attendee?.memory || attendee?.memoryPhoto ? 'A detail worth keeping.' : 'A story can have open pages.'}</h2>${attendee?.memory ? `<blockquote>${escapeHtml(attendee.memory)}</blockquote>` : '<p>No note saved. You can still keep the rest of the day.</p>'}${attendee?.memoryPhoto ? photoPreview(attendee.memoryPhoto, 'Optional photo saved in your private memory') : ''}<span class="private-note">Only on this phone</span></div>`,
-    `<div class="story-moment"><div class="story-index">04 / A WAY BACK</div><div class="story-icon reconnect">↗</div><div class="story-tag">A LITTLE DOOR LEFT OPEN</div><h2>${attendee?.connections.length ? 'A new way to say hello.' : 'Some exchanges can wait.'}</h2><p>${attendee?.connections.length ? `You saved ${attendee.connections.length} consensual connection${attendee.connections.length === 1 ? '' : 's'}.` : 'No links exchanged. There’s no wrong way to meet someone.'}</p><div class="story-foot">Your contact details stay on this phone.</div></div>`,
-    `<div class="story-ending"><div class="ending-flower">✳</div><div class="story-tag">THAT WAS YOUR DAY</div><h2>Keep what<br>you want.<br><em>Let the rest go.</em></h2><p>This little book is yours to revisit.</p><button class="button primary" data-action="export">Make a shareable summary →</button><button class="text-button" data-action="keepsakes">See my keepsakes</button></div>`,
+  const categories = savedPersonalCategories();
+  const missing = [
+    !categories.activity ? 'an activity photo' : '',
+    !categories.memory ? 'a person memory' : '',
+    !categories.connection ? 'a confirmed connection' : '',
+  ].filter(Boolean);
+  const count = attendee?.connections.filter((connection) => connection.links.length > 0).length ?? 0;
+  const slides = [
+    `<div class="story-cover"><span class="story-cover-label">A DAY TO KEEP</span><h1>${escapeHtml(eventInfo.name)}</h1><p>${escapeHtml(eventInfo.dateLabel)} · ${escapeHtml(eventInfo.place)}</p><span class="story-sticker">${completeCount()} / 4<br><b>MOMENTS</b></span><div class="cover-scribble">Your day,<br>your little<br>keepsake.</div></div>`,
+    `<div class="story-moment story-arrival"><span class="story-index">YOU WERE THERE</span><div class="story-icon arrival" aria-hidden="true">✳</div><div class="story-tag">THE FIRST PAGE</div><h2>${escapeHtml(attendee?.nickname || 'You')},<br>you made it.</h2><p>Every good story starts somewhere. Yours began at ${escapeHtml(eventInfo.place)}.</p><div class="story-foot">${escapeHtml(eventInfo.dateLabel)}</div></div>`,
+    `<div class="story-moment story-photo-moment">${attendee?.activityPhoto ? `<img src="${attendee.activityPhoto}" alt="Activity photo you saved">` : '<div class="story-empty-art" role="img" aria-label="Abstract event keepsake illustration"><span class="fallback-sun"></span><span class="fallback-ticket">A DAY<br>IN THE<br>MAKING</span><span class="fallback-spark">✳</span></div>'}<span class="story-index">A SCENE FROM TODAY</span><div class="story-tag">${attendee?.activityPhoto ? 'YOUR SNAPSHOT' : 'THE DAY, IN YOUR OWN WAY'}</div><h2>${attendee?.activityPhoto ? 'Look what you kept.' : 'Some days live beyond the camera.'}</h2><p>${attendee?.activityPhoto ? 'Your photo, kept right here in your event book.' : 'No activity photo was saved. The rest of your story is still here.'}</p></div>`,
   ];
+  if (categories.memory) slides.push(`<div class="story-moment story-note-moment"><span class="story-index">A PERSON YOU MET</span><div class="story-icon memory" aria-hidden="true">♡</div><div class="story-tag">A NOTE TO YOURSELF</div><h2>A detail worth keeping.</h2>${attendee?.memory ? `<blockquote>${escapeHtml(attendee.memory)}</blockquote>` : '<p>A face you chose to remember.</p>'}${attendee?.memoryPhoto ? photoPreview(attendee.memoryPhoto, 'Private photo saved with your person memory') : ''}<span class="private-note">Only on this phone</span></div>`);
+  slides.push(`<div class="story-moment story-connection"><span class="story-index">A WAY BACK IN TOUCH</span><div class="story-icon reconnect" aria-hidden="true">↗</div><div class="story-tag">A DOOR LEFT OPEN</div><h2>${count ? 'A new way to say hello.' : 'Good conversations count, too.'}</h2><p>${count ? `You saved ${count} consensual way${count === 1 ? '' : 's'} to reconnect.` : 'No connection was saved this time. There’s no wrong way to meet someone.'}</p><div class="privacy-seal">Names and links<br>stay on this phone</div></div>`);
+  if (missing.length) slides.push(`<div class="story-moment story-missing"><span class="story-index">OPEN PAGES ARE PART OF THE STORY</span><div class="missing-stamp" aria-hidden="true">STILL<br>YOURS</div><div class="story-tag">NO SCORE, NO CATCHING UP</div><h2>You kept what felt right.</h2><p>Nothing was saved for ${missing.join(', ')}. That’s okay; this day belongs to you either way.</p><div class="story-foot">Your recap reflects only what you chose to save.</div></div>`);
+  const type = participantType();
+  if (type) {
+    const saved = [categories.activity ? 'Activity photo' : '', categories.memory ? 'Person memory' : '', categories.connection ? 'Confirmed connection' : ''].filter(Boolean);
+    slides.push(`<div class="story-moment story-type"><span class="story-index">YOUR EVENT STYLE</span><div class="type-seal" aria-hidden="true">✳</div><div class="story-tag">MADE FROM THE MOMENTS YOU SAVED</div><h2>${type}</h2><p>Your saved moments include ${saved.map((item) => item.toLowerCase()).join(', ')}.</p><ul class="saved-category-list">${saved.map((item) => `<li><span aria-hidden="true">✓</span>${item}</li>`).join('')}</ul></div>`);
+  }
+  slides.push(`<div class="story-ending"><div class="ending-flower" aria-hidden="true">✳</div><div class="story-tag">THAT WAS YOUR DAY</div><h2>Keep what<br>you want.<br><em>Let the rest go.</em></h2><p>This little book is yours to revisit.</p><button class="button primary" data-action="export">Make a shareable summary →</button><button class="text-button" data-action="keepsakes">See my keepsakes</button></div>`);
+  return slides;
 }
 
 function recapScreen() {
@@ -258,7 +290,7 @@ function recapScreen() {
 }
 
 function exportScreen() {
-  return `${header(true)}<main class="shell export-shell"><div class="form-kicker">YOUR STORY, READY TO SHARE</div><h1>A little recap<br><em>for the group chat.</em></h1><p class="intro">Names, personal notes and profile links are always left out. Preview the exact image before downloading.</p><label class="export-toggle"><input type="checkbox" id="include-photo" ${includeActivityPhoto && attendee?.activityPhoto ? 'checked' : ''} ${attendee?.activityPhoto ? '' : 'disabled'}><span><strong>Include my activity photo</strong><small>Optional. Your person memory photo is never included.</small></span></label><div class="export-preview">${exportPreview ? `<img src="${exportPreview}" alt="Preview of the shareable event recap image">` : '<div class="preview-placeholder"><span>✳</span><p>Your private preview will appear here.</p>' + button('Create preview', 'create-export') + '</div>'}</div>${exportPreview ? `<div class="button-row">${button('Download image', 'download-export')}${button('Update preview', 'create-export', 'secondary')}</div>` : ''}<p class="privacy-hint">The preview contains no contact names, links, QR codes or private notes.</p>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  return `${header(true)}<main class="shell export-shell"><h1>Export summary</h1><p class="intro">Preview what leaves your phone.</p><div class="export-preview-wrap"><div class="export-ribbon">CARD EXPORT PREVIEW</div><div class="export-preview">${exportPreview ? `<img src="${exportPreview}" alt="Preview of the shareable event recap image">` : '<div class="preview-placeholder"><span aria-hidden="true">✳</span><p>Your private preview will appear here.</p>' + button('Create preview', 'create-export') + '</div>'}</div></div><aside class="export-privacy"><span class="export-lock" aria-hidden="true">⌑</span><p><strong>Your connections and personal notes stay on this phone.</strong><span>Only event details and the activity photo you choose are included.</span></p></aside><label class="export-toggle"><input type="checkbox" id="include-photo" ${includeActivityPhoto && attendee?.activityPhoto ? 'checked' : ''} ${attendee?.activityPhoto ? '' : 'disabled'}><span><strong>Include my activity photo</strong><small>${attendee?.activityPhoto ? 'Optional. Your person memory photo is never included.' : 'No activity photo was saved for this recap.'}</small></span></label>${exportPreview ? `<div class="export-actions"><button class="button primary" data-action="share-export">Share</button><button class="button secondary" data-action="download-export">Download image</button></div><button class="text-button export-update" data-action="create-export">Update preview</button>` : ''}<p class="privacy-hint">The image excludes names, private notes, person photos, profile links and QR data.</p>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function organizerScreen() {
@@ -303,9 +335,9 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
   bindEvents();
   setSwipeHandlers();
   if (!options.navigation && active && app.contains(active) === false) {
-    const replacement = (activeId && document.getElementById(activeId))
+    const replacement = (activeId ? document.getElementById(activeId) : null)
       || (activeAction && app.querySelector<HTMLElement>(`[data-action="${activeAction}"]`));
-    replacement?.focus({ preventScroll: true });
+    if (replacement instanceof HTMLElement) replacement.focus({ preventScroll: true });
     if (selection && (replacement instanceof HTMLInputElement || replacement instanceof HTMLTextAreaElement) && selection.start !== null && selection.end !== null) {
       replacement.setSelectionRange(selection.start, selection.end);
     }
@@ -484,6 +516,7 @@ function bindEvents() {
       if (action === 'previous-story') { const nextIndex = Math.max(0, recapIndex - 1); if (nextIndex !== recapIndex) { recapIndex = nextIndex; render({ recapDirection: -1 }); } }
       if (action === 'next-story') { if (recapIndex === recapSlides().length - 1) setScreen('export'); else { recapIndex++; render({ recapDirection: 1 }); } }
       if (action === 'create-export' || action === 'download-export') void buildExport(action === 'download-export');
+      if (action === 'share-export') void shareExport();
       if (action === 'copy-event-link') void copyText(`${location.origin}${location.pathname}?event=${eventKey}`);
       if (action === 'refresh-status') void refreshStatus();
       if (action === 'close-event') void closeEvent();
@@ -626,32 +659,72 @@ async function buildExport(download: boolean) {
   if (!download) { exportPreview = ''; }
   const canvas = document.createElement('canvas');
   canvas.width = 1080;
-  canvas.height = includeActivityPhoto && attendee?.activityPhoto ? 1350 : 1200;
+  canvas.height = 1440;
   const context = canvas.getContext('2d');
   if (!context) { errorMessage = 'Could not prepare the image preview.'; render(); return; }
-  context.fillStyle = '#f8f5ec'; context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = '#f2c84b'; context.beginPath(); context.arc(930, 116, 90, 0, Math.PI * 2); context.fill();
-  context.fillStyle = '#2856e8'; context.fillRect(76, 74, 92, 12);
-  context.fillStyle = '#5b665e'; context.font = '700 26px Arial'; context.fillText('A DAY TO KEEP  ·  REMENTO', 76, 144);
-  context.fillStyle = '#172321'; context.font = '700 70px Georgia';
-  wrapCanvasText(context, eventInfo.name, 76, 252, 760, 82, 2);
-  context.fillStyle = '#626a61'; context.font = '32px Arial'; context.fillText(`${eventInfo.dateLabel}  ·  ${eventInfo.place}`, 76, 356);
+  context.fillStyle = '#2028ee'; context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#323af5';
+  for (let y = 26; y < canvas.height; y += 60) for (let x = 26; x < canvas.width; x += 60) { context.beginPath(); context.arc(x, y, 3, 0, Math.PI * 2); context.fill(); }
+  context.fillStyle = '#f8f5ec'; context.fillRect(52, 52, 976, 1336);
+  context.fillStyle = '#c6f000'; context.fillRect(90, 94, 22, 22);
+  context.fillStyle = '#181a1b'; context.font = '700 27px Arial'; context.fillText('PUBLIC RECAP', 128, 116);
+  context.fillStyle = '#b8baad'; context.fillRect(90, 153, 900, 2);
+  context.fillStyle = '#161719'; context.font = '700 68px Arial';
+  wrapCanvasText(context, eventInfo.name, 90, 245, 850, 80, 2);
+  context.fillStyle = '#e9e5d6'; context.fillRect(90, 370, 610, 58);
+  context.fillStyle = '#292b29'; context.font = '500 26px Arial'; context.fillText(eventInfo.dateLabel, 112, 408);
+  context.fillStyle = '#e9e5d6'; context.fillRect(90, 443, 490, 58);
+  context.fillStyle = '#292b29'; context.font = '500 26px Arial'; context.fillText(eventInfo.place, 112, 481);
   if (includeActivityPhoto && attendee?.activityPhoto) {
     const image = await loadImage(attendee.activityPhoto);
-    const box = { x: 76, y: 420, width: 928, height: 520 };
+    const box = { x: 90, y: 520, width: 900, height: 545 };
     drawCover(context, image, box.x, box.y, box.width, box.height);
-    context.save(); context.translate(box.x, box.y); context.rotate(-0.035); context.strokeStyle = '#fffdf8'; context.lineWidth = 28; context.strokeRect(0, 0, box.width, box.height); context.restore();
+    context.strokeStyle = '#fffdf8'; context.lineWidth = 16; context.strokeRect(box.x + 8, box.y + 8, box.width - 16, box.height - 16);
+  } else {
+    context.fillStyle = '#d9e1ff'; context.fillRect(90, 520, 900, 545);
+    context.fillStyle = '#f5c6b9'; context.beginPath(); context.arc(780, 666, 178, 0, Math.PI * 2); context.fill();
+    context.fillStyle = '#c6f000'; context.beginPath(); context.arc(330, 925, 126, 0, Math.PI * 2); context.fill();
+    context.fillStyle = '#2028ee'; context.save(); context.translate(555, 792); context.rotate(-.08); context.fillRect(-184, -145, 368, 290); context.restore();
+    context.fillStyle = '#fffdf8'; context.font = '700 33px Arial'; context.textAlign = 'center'; context.fillText('A DAY IN', 555, 778); context.fillText('THE MAKING', 555, 825); context.textAlign = 'left';
   }
-  const footerY = canvas.height - 124;
-  context.fillStyle = '#172321'; context.font = '700 30px Arial'; context.fillText(`${completeCount()} of 4 moments saved`, 76, footerY);
-  context.fillStyle = '#626a61'; context.font = '24px Arial'; context.fillText('A few things you chose to keep from today.', 76, footerY + 46);
-  context.fillStyle = '#2856e8'; context.font = '700 24px Arial'; context.fillText('KEEP WHAT YOU WANT. LET THE REST GO.  ✳', 76, canvas.height - 36);
+  context.fillStyle = '#c6f000'; context.fillRect(90, 1090, 420, 53);
+  context.fillStyle = '#191a1a'; context.font = '700 22px Arial'; context.fillText(includeActivityPhoto && attendee?.activityPhoto ? 'MY ACTIVITY PHOTO' : 'EVENT DAY, REMEMBERED', 110, 1125);
+  context.fillStyle = '#191a1a'; context.font = '700 26px Arial'; context.fillText('REMENTO EVENT ARCHIVE · ON THIS DEVICE', 90, 1210);
+  context.fillStyle = '#aeb0a4'; context.fillRect(90, 1240, 900, 2);
+  context.fillStyle = '#333633'; context.font = '500 22px Arial'; context.fillText('Your connections and personal notes stay on this phone.', 90, 1290);
+  context.fillStyle = '#2028ee'; context.font = '700 24px Arial'; context.fillText('KEEP WHAT YOU WANT. LET THE REST GO.', 90, 1342);
   exportPreview = canvas.toDataURL('image/png');
   errorMessage = '';
   if (download) {
     const link = document.createElement('a'); link.href = exportPreview; link.download = 'remento-day-summary.png'; link.click();
   }
   render();
+}
+
+function downloadExport() {
+  const link = document.createElement('a');
+  link.href = exportPreview;
+  link.download = 'remento-day-summary.png';
+  link.click();
+}
+
+async function shareExport() {
+  if (!exportPreview) return;
+  const share = navigator.share;
+  const canShare = navigator.canShare;
+  if (!share || !canShare) { downloadExport(); return; }
+  try {
+    const binary = atob(exportPreview.split(',')[1]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    const file = new File([bytes], 'remento-day-summary.png', { type: 'image/png' });
+    const payload = { files: [file], title: `${eventInfo.name} · Remento` };
+    if (!canShare.call(navigator, payload)) { downloadExport(); return; }
+    await share.call(navigator, payload);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return;
+    downloadExport();
+  }
 }
 
 function wrapCanvasText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
