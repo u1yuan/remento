@@ -18,3 +18,5 @@ The first audience is fellow students. The user wants a simple, creative cross-d
 
 Follow `DESIGN.md` for the reusable design sequence, review criteria, and handoffs. `PASA-DESIGN.md` remains a concept sketch, and `REMENTO-DESIGN.md` is the selected Stage 1 build brief. The six design and motion skills in `.agents/skills` are available locally; use each when its stage and task apply.
 
+The attendee flow now opens a persistent milestone index after all four moments are saved. From there, attendees can add activity photos and memory notes, revisit QR sharing or scanning, and confirm an Event Wrap to open the private recap. Extra entries are stored on the same device; older single-photo and single-note records remain readable.
+

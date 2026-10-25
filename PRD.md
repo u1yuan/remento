@@ -22,7 +22,7 @@ The useful outcome to test is that an attendee can later recall **one real perso
 | **2 — return and reminders** | Private cross-device persistence with an explicit sign-in or recovery choice; real notifications with permission, delivery handling, and opt-out. | Only after Stage 1 works and users indicate they want to return to their recap or receive reminders. |
 | **3 — organizer and story options** | More organizer controls, event templates, and additional recap formats. | Only after evidence shows what organizers and attendees actually use. |
 
-Stage 1 has no leaderboard, public gallery, social-platform integration, or in-product AI. Codex may help build the product; that is separate from product functionality.
+Stage 1 has no leaderboard, public gallery, or social-platform integration. It includes one optional, attendee-requested event-style recap assessment; Codex may help build the product, which is separate from product functionality.
 
 ## Stage 1 demo fixture
 
@@ -54,7 +54,9 @@ An organizer can edit each label and scheduled cue time, including arrival's oth
 | A6 | Scheduled in-app nudges call attention to unfinished moments. | While the event page is open, an unfinished moment receives one dismissible cue at or after its scheduled time, plus a single near-close cue. Finished moments do not nudge. A page opened late shows at most one relevant cue at a time; no background, SMS, push, or email delivery is implied. |
 | R1 | Closing reveals a private swipeable story. | Story includes event cover, available moments, and an ending card. Missing moments appear as honest gaps rather than invented content. A full and partial journey both render. Explicit previous/next controls work alongside swipe. |
 | R2 | Attendee exports one summary image. | Export preview shows exactly the rendered image. By default it omits contact names, profile links, QR data, and freeform person notes, which might contain names. An activity photo can appear; person photos require a deliberate inclusion choice and preview. No contact list is exported. |
+| R3 | Attendee may request an event-style description in the recap. | Before requesting, the attendee sees that only three saved/not-saved signals (activity photo, person memory, confirmed connection) are sent to OpenAI. The API receives no photos, notes, names, links, or device IDs. No saved signals means no call. Valid results show confidence per trait; two or more traits add the local **All-Rounder** label. Refusals, invalid results, and service errors offer retry without inventing a label. |
 | P1 | Personal data stays on the original device. | Event service stores only event configuration, join count keys, and close status. Photos, notes, own links, scanned contacts, and recap are local to the attendee phone. The organizer cannot view them. |
+| P2 | Optional event-style assessment limits data transfer. | The server accepts exactly three booleans, calls the Decisions API only after an attendee action, holds no attendee inputs/results for later use, keeps `OPENAI_API_KEY` server-side, and returns only validated trait IDs/labels/confidences. |
 
 “Join count keys” means opaque per-event client records for deduplicating the same browser/device. Without accounts, clearing storage or joining from another device may count the same person again. The UI labels the number **in-app joins**, never total event attendance. Event configuration includes its four labels and cue times; this is the shared event data required for all attendees to see the same prompts. Keep organizer write access separate from public join access.
 

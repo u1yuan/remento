@@ -5,6 +5,7 @@ PASA-DESIGN.md
 
 node_modules/
 dist/
+remotion/out/
 .vercel/
 .env
 .env.*

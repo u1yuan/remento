@@ -6,15 +6,22 @@
   "scripts": {
     "dev": "vercel dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "video:studio": "remotion studio remotion/src/index.tsx",
+    "video:render": "remotion render remotion/src/index.tsx RementoDemo remotion/out/remento-demo.mp4 --codec=h264 --crf=18"
   },
   "dependencies": {
     "@upstash/redis": "^1.35.6",
+    "openai": "^7.43.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.537",
+    "@remotion/media": "^4.0.537",
+    "@remotion/transitions": "^4.0.537",
     "@types/qrcode": "^1.5.5",
     "@vercel/node": "^5.3.20",
+    "remotion": "^4.0.537",
     "typescript": "^5.8.3",
     "vercel": "^65.2.0",
     "vite": "^8.3.5"

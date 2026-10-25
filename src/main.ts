@@ -8,7 +8,9 @@ type Attendee = {
   nickname: string;
   joinedAt: string;
   activityPhoto: string;
+  activityPhotos?: string[];
   memory: string;
+  memories?: { text: string; photo?: string; savedAt: string }[];
   memoryPhoto: string;
   links: SocialLink[];
   connections: Connection[];
@@ -27,7 +29,10 @@ type EventInfo = {
   moments: { id: MomentId; label: string; cueAt: string }[];
 };
 type Status = { event: EventInfo; closedAt: string | null; joinCount: number };
-type Screen = 'join' | 'home' | 'activity' | 'memory' | 'qr' | 'scan' | 'keepsakes' | 'recap' | 'export' | 'organizer';
+type ParticipantTraitId = 'scene-catcher' | 'detail-keeper' | 'connector';
+type ParticipantTrait = { id: ParticipantTraitId; label: string; confidence: number };
+type ParticipantAssessment = { status: 'idle' | 'loading' | 'error' | 'ready'; signalKey: string; traits: ParticipantTrait[] };
+type Screen = 'join' | 'home' | 'index' | 'activity' | 'memory' | 'qr' | 'scan' | 'keepsakes' | 'recap' | 'export' | 'organizer';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const eventKey = 'codex-uiai-2026';
@@ -59,6 +64,7 @@ let memoryPhotoDraft = '';
 let memoryDraft = '';
 let scannedConnection: { nickname: string; links: SocialLink[] } | null = null;
 let recapIndex = 0;
+let participantAssessment: ParticipantAssessment = { status: 'idle', signalKey: '', traits: [] };
 let exportPreview = '';
 let includeActivityPhoto = true;
 let qrDataUrl = '';
@@ -107,9 +113,21 @@ function escapeHtml(value: unknown) {
 function completed(id: MomentId) {
   if (!attendee) return false;
   if (id === 'arrival') return Boolean(attendee.joinedAt);
-  if (id === 'activity') return Boolean(attendee.activityPhoto);
-  if (id === 'memory') return Boolean(attendee.memory.trim() || attendee.memoryPhoto);
+  if (id === 'activity') return activityPhotos().length > 0;
+  if (id === 'memory') return memories().length > 0;
   return attendee.connections.some((connection) => connection.links.length > 0);
+}
+
+function activityPhotos() {
+  if (!attendee) return [];
+  return attendee.activityPhotos?.length ? attendee.activityPhotos : attendee.activityPhoto ? [attendee.activityPhoto] : [];
+}
+
+function memories() {
+  if (!attendee) return [];
+  return attendee.memories?.length ? attendee.memories : (attendee.memory.trim() || attendee.memoryPhoto)
+    ? [{ text: attendee.memory, photo: attendee.memoryPhoto, savedAt: attendee.joinedAt }]
+    : [];
 }
 
 function completeCount() {
@@ -118,20 +136,39 @@ function completeCount() {
 
 function savedPersonalCategories() {
   return {
-    activity: Boolean(attendee?.activityPhoto),
-    memory: Boolean(attendee?.memory.trim() || attendee?.memoryPhoto),
+    activity: activityPhotos().length > 0,
+    memory: memories().length > 0,
     connection: Boolean(attendee?.connections.some((connection) => connection.links.length > 0)),
   };
 }
 
-function participantType() {
+function participantSignalKey(categories = savedPersonalCategories()) {
+  return `${Number(categories.activity)}${Number(categories.memory)}${Number(categories.connection)}`;
+}
+
+async function requestParticipantTraits() {
   const categories = savedPersonalCategories();
-  const count = Object.values(categories).filter(Boolean).length;
-  if (count > 1) return 'All-Rounder';
-  if (categories.activity) return 'Scene Catcher';
-  if (categories.memory) return 'Detail Keeper';
-  if (categories.connection) return 'Connector';
-  return '';
+  const signalKey = participantSignalKey(categories);
+  if (signalKey === '000' || participantAssessment.status === 'loading') return;
+  if (participantAssessment.status === 'ready' && participantAssessment.signalKey === signalKey) return;
+  participantAssessment = { status: 'loading', signalKey, traits: [] };
+  errorMessage = '';
+  render();
+  try {
+    const result = await api('participant-type', 'POST', {
+      activityPhoto: categories.activity,
+      personMemory: categories.memory,
+      confirmedConnection: categories.connection,
+    }, '', '/api/participant-type') as { traits?: ParticipantTrait[] };
+    const allowed = new Set<ParticipantTraitId>(['scene-catcher', 'detail-keeper', 'connector']);
+    if (!Array.isArray(result.traits) || result.traits.length === 0 || result.traits.some((trait) =>
+      !allowed.has(trait.id) || typeof trait.label !== 'string' || !Number.isFinite(trait.confidence) || trait.confidence < 0 || trait.confidence > 1
+    )) throw new Error('The recap could not read a valid result. Please try again.');
+    participantAssessment = { status: 'ready', signalKey, traits: result.traits };
+  } catch {
+    participantAssessment = { status: 'error', signalKey, traits: [] };
+  }
+  if (screen === 'recap') render();
 }
 
 const momentOrder: MomentId[] = ['arrival', 'activity', 'memory', 'reconnect'];
@@ -154,13 +191,16 @@ if (attendee) {
   attendee.connections ??= [];
   attendee.dismissedCues ??= [];
   attendee.activityPhoto ??= '';
+  attendee.activityPhotos ??= attendee.activityPhoto ? [attendee.activityPhoto] : [];
   attendee.memory ??= '';
   attendee.memoryPhoto ??= '';
+  attendee.memories ??= (attendee.memory.trim() || attendee.memoryPhoto) ? [{ text: attendee.memory, photo: attendee.memoryPhoto, savedAt: attendee.joinedAt }] : [];
   const previousMilestone = attendee.milestone;
   advanceMilestone();
   if (previousMilestone !== attendee.milestone) {
     try { localStorage.setItem(localKey, JSON.stringify(attendee)); } catch { /* The in-memory migration still works for this visit. */ }
   }
+  if (completeCount() === 4 && screen === 'home') screen = 'index';
 }
 
 function eventTimeRange() {
@@ -172,8 +212,18 @@ function button(label: string, action: string, style = 'primary', extra = '') {
   return `<button class="button ${style}" data-action="${action}" ${extra}>${label}</button>`;
 }
 
+function momentIcon(name: string) {
+  const paths: Record<string, string> = {
+    spark: '<path d="M12 2.8 14.5 9.5 21.2 12l-6.7 2.5L12 21.2l-2.5-6.7L2.8 12l6.7-2.5L12 2.8Z"/><path d="m19 2 .7 2.3L22 5l-2.3.7L19 8l-.7-2.3L16 5l2.3-.7L19 2Z"/>',
+    scene: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 17 5-5 3.5 3 2.5-2 5 4"/>',
+    memory: '<path d="M20.8 8.8c0 5.2-8.8 10.3-8.8 10.3S3.2 14 3.2 8.8A4.3 4.3 0 0 1 12 6.9a4.3 4.3 0 0 1 8.8 1.9Z"/>',
+    link: '<path d="M10 13.8a4.2 4.2 0 0 0 6 .1l3-3a4.2 4.2 0 0 0-6-6l-1.7 1.7"/><path d="M14 10.2a4.2 4.2 0 0 0-6-.1l-3 3a4.2 4.2 0 0 0 6 6l1.7-1.7"/>',
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? paths.spark}</svg>`;
+}
+
 function header(back = false) {
-  return `<header class="site-header"><a class="brand" href="#" data-action="home" aria-label="Remento current milestone"><span class="brand-mark">r</span><span>remento</span></a><div class="header-right">${attendee ? '<button class="keepsakes-nav" data-action="keepsakes">My keepsakes</button>' : '<span class="local-badge"><i></i> Your little event book</span>'}</div></header>`;
+  return `<header class="site-header"><a class="brand" href="#" data-action="home" aria-label="Remento event book"><span class="brand-mark">r</span><span>remento</span></a><div class="header-right">${attendee ? `<button class="keepsakes-nav" data-action="${completeCount() === 4 ? 'index' : 'keepsakes'}">${completeCount() === 4 ? 'Milestones' : 'My keepsakes'}</button>` : '<span class="local-badge"><i></i> Your little event book</span>'}</div></header>`;
 }
 
 function photoPreview(data: string, alt: string) {
@@ -208,10 +258,10 @@ function homeScreen() {
   advanceMilestone();
   const index = Math.min(attendee.milestone ?? 1, 4);
   const items = [
-    { title: 'I made it', detail: 'You’re here. Let the day begin.', icon: '✳', action: 'home', complete: true },
-    { title: eventInfo.moments[1].label, detail: 'Keep one little scene from today.', icon: '▧', action: 'activity', complete: completed('activity') },
-    { title: eventInfo.moments[2].label, detail: 'Write one detail you’ll remember.', icon: '♡', action: 'memory', complete: completed('memory') },
-    { title: eventInfo.moments[3].label, detail: 'Exchange a link when it feels right.', icon: '↗', action: 'scan', complete: completed('reconnect') },
+    { title: 'I made it', detail: 'You’re here. Let the day begin.', icon: 'spark', action: 'home', complete: true },
+    { title: eventInfo.moments[1].label, detail: 'Keep one little scene from today.', icon: 'scene', action: 'activity', complete: completed('activity') },
+    { title: eventInfo.moments[2].label, detail: 'Write one detail you’ll remember.', icon: 'memory', action: 'memory', complete: completed('memory') },
+    { title: eventInfo.moments[3].label, detail: 'Exchange a link when it feels right.', icon: 'link', action: 'scan', complete: completed('reconnect') },
   ];
   const current = items[index] ?? null;
   const cue = cueForNow();
@@ -220,22 +270,36 @@ function homeScreen() {
   const notice = cue ? `<aside class="nudge"><span class="nudge-spark" aria-hidden="true">✳</span><div><strong>${cue === 'near-close' ? 'The event is wrapping up.' : `${escapeHtml(cueMoment?.label)} is still waiting.`}</strong><p>${cue === 'near-close' ? 'Save anything you want to remember.' : 'A small moment is enough.'}</p></div><button data-action="${cue === 'near-close' ? 'home' : cue}" class="nudge-open">${cue === 'near-close' ? 'Take a look' : 'Open'} →</button><button class="dismiss" data-action="dismiss-nudge" aria-label="Dismiss reminder">×</button></aside>` : '';
   const showSavedStamp = savedStamp;
   savedStamp = false;
-  return `${header()}<main class="shell home-shell"><section class="event-heading"><div class="overline"><span class="live-dot"></span> YOUR EVENT BOOK</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} <span>·</span> ${eventTimeRange()} <span>·</span> ${escapeHtml(eventInfo.place)}</p><div class="progress-row"><div><strong>${index} <span>of 4 moments</span></strong><span class="private-note">Only on this phone · ${escapeHtml(attendee.nickname)}</span></div><div class="progress-track" role="progressbar" aria-label="Milestone progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${index}"><span style="transform:scaleX(${index / 4})"></span></div></div></section>
-    ${notice}${showSavedStamp ? '<div class="saved-stamp" role="status"><span aria-hidden="true">✳</span> Moment saved to this phone</div>' : ''}${current ? `<section class="current-milestone" aria-labelledby="milestone-title"><div class="milestone-meta">MOMENT 0${index + 1} OF 04</div><div class="milestone-icon ${momentOrder[index]}">${current.icon}</div><h2 id="milestone-title">${escapeHtml(current.title)}</h2><p>${escapeHtml(current.detail)}</p>${index === 1 ? button('Choose a photo →', 'activity') : index === 2 ? button('Write a memory →', 'memory') : `<div class="button-row">${button('Scan someone’s QR →', 'scan')}${button('Set up my QR', 'qr', 'secondary')}</div>`}</section>` : `<section class="current-milestone all-done"><div class="milestone-icon arrival">✳</div><div class="milestone-meta">ALL FOUR MOMENTS KEPT</div><h2 id="milestone-title">That was your day.</h2><p>Your little event book is ready whenever you want to revisit it.</p>${button('See my private recap →', 'recap')}</section>`}
-    <section class="home-links"><span>Saved here, on this phone</span><span>${attendee.connections.length} connection${attendee.connections.length === 1 ? '' : 's'} · ${Number(Boolean(attendee.activityPhoto)) + Number(Boolean(attendee.memoryPhoto))} photos</span></section>
+  return `${header()}<main class="shell home-shell"><section class="event-heading"><div class="event-heading-copy"><div class="overline"><span class="live-dot"></span> YOUR EVENT BOOK</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">${escapeHtml(eventInfo.dateLabel)} <span>·</span> ${eventTimeRange()} <span>·</span> ${escapeHtml(eventInfo.place)}</p><div class="progress-row"><div><strong>${index} <span>of 4 moments</span></strong><span class="private-note">A little book for ${escapeHtml(attendee.nickname)}</span></div><div class="progress-track" role="progressbar" aria-label="Milestone progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${index}"><span style="transform:scaleX(${index / 4})"></span></div></div></div><div class="event-cover-art" aria-hidden="true"><span class="cover-orbit"></span><span class="cover-sun"></span><span class="cover-ticket"><small>FIELD NOTES</small><b>ONE<br>GOOD<br>DAY</b><i>25 — 10 — 26</i></span><span class="cover-spark">✳</span></div></section>
+    ${notice}${showSavedStamp ? '<div class="saved-stamp" role="status"><span aria-hidden="true">✓</span> Moment saved to this phone</div>' : ''}${current ? `<section class="current-milestone" aria-labelledby="milestone-title"><div class="milestone-copy"><div class="milestone-meta">YOUR NEXT LITTLE MOMENT <span>0${index + 1} / 04</span></div><div class="milestone-icon ${momentOrder[index]}">${momentIcon(current.icon)}</div><h2 id="milestone-title">${escapeHtml(current.title)}</h2><p>${escapeHtml(current.detail)}</p>${index === 1 ? button('Choose a photo <span aria-hidden="true">→</span>', 'activity') : index === 2 ? button('Write a memory <span aria-hidden="true">→</span>', 'memory') : `<div class="button-row">${button('Scan someone’s QR <span aria-hidden="true">→</span>', 'scan')}${button('Set up my QR', 'qr', 'secondary')}</div>`}</div><aside class="milestone-aside"><span class="aside-stamp">TAKE<br>YOUR<br>TIME</span><p>Keep what feels like yours. Leave the rest for another day.</p><span class="aside-rule"></span></aside></section>` : `<section class="current-milestone all-done"><div class="milestone-copy"><div class="milestone-icon arrival">${momentIcon('spark')}</div><div class="milestone-meta">ALL FOUR MOMENTS KEPT</div><h2 id="milestone-title">That was your day.</h2><p>Your little event book is ready whenever you want to revisit it.</p>${button('See my private recap <span aria-hidden="true">→</span>', 'recap')}</div><aside class="milestone-aside"><span class="aside-stamp">A DAY<br>WELL<br>KEPT</span></aside></section>`}
+    <section class="home-links"><span><span class="privacy-mark" aria-hidden="true">⌑</span> Saved here, on this phone</span><span>${attendee.connections.length} connection${attendee.connections.length === 1 ? '' : 's'} <i>·</i> ${activityPhotos().length + memories().filter((entry) => Boolean(entry.photo)).length} photos</span></section>
     ${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
+function milestoneIndexScreen() {
+  if (!attendee) return joinScreen();
+  const rows = [
+    { id: 'arrival' as MomentId, title: eventInfo.moments[0].label, detail: `Joined as ${attendee.nickname}`, saved: '', icon: 'spark', action: '', actionLabel: 'Saved once' },
+    { id: 'activity' as MomentId, title: eventInfo.moments[1].label, detail: `${activityPhotos().length} photo${activityPhotos().length === 1 ? '' : 's'} saved`, saved: activityPhotos().map((photo, index) => `<img src="${photo}" alt="Saved activity photo ${index + 1}">`).join(''), icon: 'scene', action: 'activity', actionLabel: 'Add a photo' },
+    { id: 'memory' as MomentId, title: eventInfo.moments[2].label, detail: `${memories().length} note${memories().length === 1 ? '' : 's'} saved`, saved: memories().map((entry) => `<blockquote>${escapeHtml(entry.text || 'A face you chose to remember.')}</blockquote>`).join(''), icon: 'memory', action: 'memory', actionLabel: 'Add a note' },
+    { id: 'reconnect' as MomentId, title: eventInfo.moments[3].label, detail: `${attendee.connections.length} connection${attendee.connections.length === 1 ? '' : 's'} saved`, saved: attendee.connections.map((connection) => `<span>${escapeHtml(connection.nickname)}</span>`).join(''), icon: 'link', action: 'scan', actionLabel: 'Scan a QR' },
+  ];
+  const rowsMarkup = rows.map((row, index) => `<article class="index-row ${completed(row.id) ? 'is-done' : ''}"><span class="moment-number">0${index + 1}</span><div class="moment-icon ${row.id}">${momentIcon(row.icon)}</div><div class="moment-copy"><div class="moment-title">${escapeHtml(row.title)} <span class="done-word">${completed(row.id) ? 'Saved' : 'Not saved'}</span></div><p>${escapeHtml(row.detail)}</p>${row.saved ? `<div class="index-saved-content">${row.saved}</div>` : ''}</div>${row.action ? `<button class="moment-action" data-action="${row.action}">${row.actionLabel} <span aria-hidden="true">→</span></button>` : '<span class="index-once">One-time</span>'}</article>`).join('');
+  return `${header()}<main class="shell home-shell milestone-index"><section class="event-heading"><div class="event-heading-copy"><div class="overline">YOUR EVENT BOOK · COMPLETE</div><h1>${escapeHtml(eventInfo.name)}</h1><p class="event-meta">All four shared moments are here to revisit, even after the event closes.</p><div class="progress-row"><div><strong>4 <span>of 4 moments</span></strong><span class="private-note">A little book for ${escapeHtml(attendee.nickname)}</span></div><div class="progress-track" role="progressbar" aria-label="Milestone progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="4"><span style="transform:scaleX(1)"></span></div></div></div><div class="event-cover-art" aria-hidden="true"><span class="cover-orbit"></span><span class="cover-sun"></span><span class="cover-ticket"><small>FIELD NOTES</small><b>ONE<br>GOOD<br>DAY</b><i>25 — 10 — 26</i></span><span class="cover-spark">✳</span></div></section><section class="index-list" aria-label="Your saved milestones">${rowsMarkup}</section><section class="index-actions"><div><span class="overline">WHEN YOU’RE READY</span><h2>Your day, gathered in one place.</h2><p>Make a private recap from the moments you saved on this phone.</p></div><button class="button primary" data-action="event-wrap">Make my Event Wrap <span aria-hidden="true">→</span></button></section><div class="index-secondary-actions"><button class="text-button" data-action="qr">Share my QR</button><span aria-hidden="true">·</span><button class="text-button" data-action="keepsakes">See all keepsakes</button></div><dialog class="event-wrap-dialog" aria-labelledby="event-wrap-title" aria-describedby="event-wrap-description"><div class="dialog-kicker">YOUR EVENT BOOK</div><h2 id="event-wrap-title">Make your Event Wrap?</h2><p id="event-wrap-description">We’ll gather the entries saved on this phone into your private recap. You can review it before making any shareable image.</p><div class="button-row"><button class="button primary" data-action="confirm-event-wrap">Make my recap</button><button class="button secondary" data-action="cancel-event-wrap">Cancel</button></div></dialog></main>${footer()}`;
+}
+
 function joinScreen() {
-  return `${header()}<main class="shell join-shell"><div class="join-illustration" aria-hidden="true"><div class="sun-disc"></div><div class="ticket-shape">TODAY<br><b>IS YOURS</b></div><span class="spark spark-one">✳</span><span class="spark spark-two">✴</span><span class="scribble">a day<br>to keep</span></div><div class="overline">A POCKET SCRAPBOOK FOR TODAY</div><h1>Keep the moments<br><em>that make the day.</em></h1><p class="intro">A quick hello, a scene worth saving, someone you’d like to remember. Take the bits that feel like yours.</p><section class="event-ticket"><div class="ticket-stamp">TODAY<br><b>25 OCT</b></div><div><div class="overline">YOU’RE INVITED</div><h2>${escapeHtml(eventInfo.name)}</h2><p>${escapeHtml(eventInfo.dateLabel)} · ${eventTimeRange()} · ${escapeHtml(eventInfo.place)}</p></div></section>${status.closedAt ? '<div class="closed-banner"><span>✓</span><div><strong>Event closed</strong><p>This event is no longer accepting new attendees.</p></div></div>' : ''}<form id="join-form" class="join-form"><label for="nickname">What should we call you?</label><input id="nickname" name="nickname" maxlength="32" autocomplete="nickname" placeholder="Your name or a nickname" required value="${escapeHtml(attendee?.nickname ?? '')}"><button class="button primary button-wide" type="submit" ${status.closedAt ? 'disabled' : ''}>Join the event <span>→</span></button><p class="privacy-hint">Your photos, notes and saved links stay on this phone.</p></form>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  return `${header()}<main class="shell join-shell"><section class="join-hero"><div class="join-illustration" aria-hidden="true"><span class="join-orbit"></span><span class="join-sun"></span><span class="ticket-shape"><small>FIELD NOTES</small><b>ONE<br>GOOD<br>DAY</b><i>KEEP THIS</i></span><span class="join-spark">✳</span><span class="join-handwritten">little things<br>stay with us</span></div><div class="join-copy"><div class="overline">A POCKET SCRAPBOOK FOR TODAY</div><h1>Keep the moments <em>that make the day.</em></h1><p class="intro">A quick hello, a scene worth saving, someone you’d like to remember. Take the bits that feel like yours.</p></div></section><section class="event-ticket"><div class="ticket-stamp"><span>YOUR<br>INVITE</span><b>25<br>OCT</b></div><div><div class="overline">YOU’RE INVITED</div><h2>${escapeHtml(eventInfo.name)}</h2><p>${escapeHtml(eventInfo.dateLabel)} · ${eventTimeRange()} · ${escapeHtml(eventInfo.place)}</p></div></section>${status.closedAt ? '<div class="closed-banner"><span>✓</span><div><strong>Event closed</strong><p>This event is no longer accepting new attendees.</p></div></div>' : ''}<form id="join-form" class="join-form"><label for="nickname">What should we call you?</label><input id="nickname" name="nickname" maxlength="32" autocomplete="nickname" placeholder="Your name or a nickname" required value="${escapeHtml(attendee?.nickname ?? '')}"><button class="button primary button-wide" type="submit">Join the event <span aria-hidden="true">→</span></button><p class="privacy-hint">Your photos, notes and saved links stay on this phone.</p></form>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function activityScreen() {
-  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 02 / ACTIVITY</div><h1>Catch a little<br><em>piece of the day.</em></h1><p class="intro">Food, a busy table, a tiny detail. Your snapshot is a memory, not proof of anything.</p><div class="photo-well ${activityDraft || attendee?.activityPhoto ? 'has-photo' : ''}">${photoPreview(activityDraft || attendee?.activityPhoto || '', 'Your activity snapshot preview') || '<div class="photo-placeholder"><span>▧</span><strong>A scene from today</strong><small>Choose a photo from this phone</small></div>'}</div><label class="button secondary file-button">Choose a photo<input id="activity-file" type="file" accept="image/*" capture="environment"></label>${activityDraft ? `<div class="button-row">${button('Save this moment', 'save-activity')}${button('Choose another', 'replace-activity', 'quiet-button')}</div>` : attendee?.activityPhoto ? `<div class="button-row">${button('Replace photo', 'replace-activity', 'secondary')}${button('Delete photo', 'delete-activity', 'quiet-button')}</div>` : '<p class="privacy-hint centered">Picking a photo is optional until you save it.</p>'}${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  const photos = activityPhotos();
+  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 02 / ACTIVITY</div><h1>Catch a little<br><em>piece of the day.</em></h1><p class="intro">Food, a busy table, a tiny detail. Add another snapshot whenever you like.</p>${photos.length ? `<div class="entry-photo-grid">${photos.map((photo, index) => `<figure><img src="${photo}" alt="Activity photo ${index + 1} saved on this phone"><figcaption>Scene ${index + 1}</figcaption></figure>`).join('')}</div>` : ''}<div class="photo-well ${activityDraft ? 'has-photo' : ''}">${photoPreview(activityDraft, 'Your new activity snapshot preview') || '<div class="photo-placeholder"><span>▧</span><strong>A scene from today</strong><small>Choose a photo from this phone</small></div>'}</div><label class="button secondary file-button">Choose a photo<input id="activity-file" type="file" accept="image/*" capture="environment"></label>${activityDraft ? `<div class="button-row">${button('Save this photo', 'save-activity')}${button('Choose another', 'replace-activity', 'quiet-button')}</div>` : '<p class="privacy-hint centered">Photos stay on this phone.</p>'}${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function memoryScreen() {
-  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 03 / SOMEONE YOU MET</div><h1>Remember a<br><em>small detail.</em></h1><p class="intro">A thought, a shared laugh, what you talked about. A name isn’t required. Your note stays here.</p><form id="memory-form" class="memory-form"><label for="memory">What would you like to remember?</label><textarea id="memory" name="memory" maxlength="500" rows="5" placeholder="We talked about…">${escapeHtml(memoryDraft || attendee?.memory || '')}</textarea><div class="field-hint">A few words are plenty.</div><div class="optional-photo"><span class="mini-icon">♡</span><div><strong>Add a photo (optional)</strong><p>Only with the other person’s permission.</p></div><label class="mini-file">Choose<input type="file" id="memory-photo" accept="image/*" capture="environment"></label></div>${memoryPhotoDraft || attendee?.memoryPhoto ? `<div class="memory-photo-preview">${photoPreview(memoryPhotoDraft || attendee?.memoryPhoto || '', 'Optional memory photo')}${memoryPhotoDraft ? '<label class="consent-check"><input type="checkbox" id="photo-consent"> I have their permission to save this photo.</label>' : button('Remove photo', 'delete-memory-photo', 'quiet-button')}</div>` : ''}<button class="button primary button-wide" type="submit">Save this memory <span>→</span></button><p class="privacy-hint">Stored only in this browser on this phone.</p></form>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  const entries = memories();
+  return `${header(true)}<main class="shell form-shell"><div class="form-kicker">MOMENT 03 / SOMEONE YOU MET</div><h1>Remember a<br><em>small detail.</em></h1><p class="intro">Add a thought, a shared laugh, or something you talked about. Each note stays on this phone.</p>${entries.length ? `<section class="memory-entry-list" aria-label="Saved memory notes">${entries.map((entry, index) => `<article class="memory-entry"><span class="overline">NOTE 0${index + 1}</span><p>${escapeHtml(entry.text || 'A face you chose to remember.')}</p>${entry.photo ? photoPreview(entry.photo, `Photo saved with note ${index + 1}`) : ''}</article>`).join('')}</section>` : ''}<form id="memory-form" class="memory-form"><label for="memory">Add a memory note</label><textarea id="memory" name="memory" maxlength="500" rows="5" placeholder="We talked about…">${escapeHtml(memoryDraft)}</textarea><div class="field-hint">A few words are plenty.</div><div class="optional-photo"><span class="mini-icon">♡</span><div><strong>Add a photo (optional)</strong><p>Only with the other person’s permission.</p></div><label class="mini-file">Choose<input type="file" id="memory-photo" accept="image/*" capture="environment"></label></div>${memoryPhotoDraft ? `<div class="memory-photo-preview">${photoPreview(memoryPhotoDraft, 'Optional new memory photo')}<label class="consent-check"><input type="checkbox" id="photo-consent"> I have their permission to save this photo.</label></div>` : ''}<button class="button primary button-wide" type="submit">Save this memory <span>→</span></button><p class="privacy-hint">Stored only in this browser on this phone.</p></form>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function qrScreen() {
@@ -251,14 +315,16 @@ function scanScreen() {
 function connectionsScreen() {
   const connections = attendee?.connections ?? [];
   const photos = [
-    ...(attendee?.activityPhoto ? [{ key: 'activity', label: 'A scene from today', src: attendee.activityPhoto }] : []),
-    ...(attendee?.memoryPhoto ? [{ key: 'memory', label: 'Someone you met', src: attendee.memoryPhoto }] : []),
+    ...activityPhotos().map((src, index) => ({ key: 'activity', index, label: `A scene from today · ${index + 1}`, src })),
+    ...memories().flatMap((entry, index) => entry.photo ? [{ key: 'memory', index, label: `Someone you met · ${index + 1}`, src: entry.photo }] : []),
   ];
-  return `${header()}<main class="shell form-shell keepsakes-shell"><div class="form-kicker">SAVED ON THIS PHONE</div><h1>My<br><em>keepsakes.</em></h1><p class="intro">Photos and consensual connections stay private in this browser. They will be here as you move through the moments.</p><section class="keepsake-section"><h2>Photos <span>${photos.length}</span></h2>${photos.length ? `<div class="keepsake-photos">${photos.map((photo) => `<article class="keepsake-photo"><img src="${photo.src}" alt="${escapeHtml(photo.label)}"><div><strong>${escapeHtml(photo.label)}</strong><button data-action="remove-${photo.key}-photo" class="text-button">Remove photo</button></div></article>`).join('')}</div>` : '<p class="keepsake-empty">Photos you save during the event will appear here.</p>'}</section><section class="keepsake-section"><h2>Connections <span>${connections.length}</span></h2>${connections.length ? `<div class="connection-list">${connections.map((contact, index) => `<article class="connection-card"><div class="connection-avatar">${escapeHtml((contact.nickname || '?').charAt(0).toUpperCase())}</div><div class="connection-main"><h3>${escapeHtml(contact.nickname)}</h3><p>${contact.links.map((link) => escapeHtml(host(link.url))).join(' &middot; ')}</p><div class="connection-actions">${contact.links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} &#8599;</a>`).join('')}</div></div><button class="remove-contact" data-action="remove-connection" data-index="${index}" aria-label="Remove ${escapeHtml(contact.nickname)}">&#215;</button></article>`).join('')}</div>` : '<p class="keepsake-empty">When someone chooses to share their QR, the link stays here.</p>'}<div class="button-row">${button('Scan a QR', 'scan')}${button('Share my QR', 'qr', 'secondary')}</div></section><button data-action="home" class="text-button keepsakes-return">&#8592; Continue your current moment</button>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
+  return `${header()}<main class="shell form-shell keepsakes-shell"><div class="form-kicker">SAVED ON THIS PHONE</div><h1>My<br><em>keepsakes.</em></h1><p class="intro">Photos and consensual connections stay private in this browser. They will be here as you move through the moments.</p><section class="keepsake-section"><h2>Photos <span>${photos.length}</span></h2>${photos.length ? `<div class="keepsake-photos">${photos.map((photo) => `<article class="keepsake-photo"><img src="${photo.src}" alt="${escapeHtml(photo.label)}"><div><strong>${escapeHtml(photo.label)}</strong><button data-action="remove-${photo.key}-photo" data-index="${photo.index}" class="text-button">Remove photo</button></div></article>`).join('')}</div>` : '<p class="keepsake-empty">Photos you save during the event will appear here.</p>'}</section><section class="keepsake-section"><h2>Connections <span>${connections.length}</span></h2>${connections.length ? `<div class="connection-list">${connections.map((contact, index) => `<article class="connection-card"><div class="connection-avatar">${escapeHtml((contact.nickname || '?').charAt(0).toUpperCase())}</div><div class="connection-main"><h3>${escapeHtml(contact.nickname)}</h3><p>${contact.links.map((link) => escapeHtml(host(link.url))).join(' &middot; ')}</p><div class="connection-actions">${contact.links.map((link) => `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)} &#8599;</a>`).join('')}</div></div><button class="remove-contact" data-action="remove-connection" data-index="${index}" aria-label="Remove ${escapeHtml(contact.nickname)}">&#215;</button></article>`).join('')}</div>` : '<p class="keepsake-empty">When someone chooses to share their QR, the link stays here.</p>'}<div class="button-row">${button('Scan a QR', 'scan')}${button('Share my QR', 'qr', 'secondary')}</div></section><button data-action="home" class="text-button keepsakes-return">&#8592; Continue your current moment</button>${errorMessage ? `<p class="error-note" role="alert">${escapeHtml(errorMessage)}</p>` : ''}</main>${footer()}`;
 }
 
 function recapSlides(): string[] {
   const categories = savedPersonalCategories();
+  const savedPhotos = activityPhotos();
+  const savedMemories = memories();
   const missing = [
     !categories.activity ? 'an activity photo' : '',
     !categories.memory ? 'a person memory' : '',
@@ -268,18 +334,40 @@ function recapSlides(): string[] {
   const slides = [
     `<div class="story-cover"><span class="story-cover-label">A DAY TO KEEP</span><h1>${escapeHtml(eventInfo.name)}</h1><p>${escapeHtml(eventInfo.dateLabel)} · ${escapeHtml(eventInfo.place)}</p><span class="story-sticker">${completeCount()} / 4<br><b>MOMENTS</b></span><div class="cover-scribble">Your day,<br>your little<br>keepsake.</div></div>`,
     `<div class="story-moment story-arrival"><span class="story-index">YOU WERE THERE</span><div class="story-icon arrival" aria-hidden="true">✳</div><div class="story-tag">THE FIRST PAGE</div><h2>${escapeHtml(attendee?.nickname || 'You')},<br>you made it.</h2><p>Every good story starts somewhere. Yours began at ${escapeHtml(eventInfo.place)}.</p><div class="story-foot">${escapeHtml(eventInfo.dateLabel)}</div></div>`,
-    `<div class="story-moment story-photo-moment">${attendee?.activityPhoto ? `<img src="${attendee.activityPhoto}" alt="Activity photo you saved">` : '<div class="story-empty-art" role="img" aria-label="Abstract event keepsake illustration"><span class="fallback-sun"></span><span class="fallback-ticket">A DAY<br>IN THE<br>MAKING</span><span class="fallback-spark">✳</span></div>'}<span class="story-index">A SCENE FROM TODAY</span><div class="story-tag">${attendee?.activityPhoto ? 'YOUR SNAPSHOT' : 'THE DAY, IN YOUR OWN WAY'}</div><h2>${attendee?.activityPhoto ? 'Look what you kept.' : 'Some days live beyond the camera.'}</h2><p>${attendee?.activityPhoto ? 'Your photo, kept right here in your event book.' : 'No activity photo was saved. The rest of your story is still here.'}</p></div>`,
+    ...(savedPhotos.length ? savedPhotos.map((photo, index) => `<div class="story-moment story-photo-moment"><img src="${photo}" alt="Activity photo ${index + 1} you saved"><span class="story-index">A SCENE FROM TODAY · ${index + 1} / ${savedPhotos.length}</span><div class="story-tag">YOUR SNAPSHOT</div><h2>${index === 0 ? 'Look what you kept.' : 'Another little scene.'}</h2><p>Your photo, kept right here in your event book.</p></div>`) : [`<div class="story-moment story-photo-moment"><div class="story-empty-art" role="img" aria-label="Abstract event keepsake illustration"><span class="fallback-sun"></span><span class="fallback-ticket">A DAY<br>IN THE<br>MAKING</span><span class="fallback-spark">✳</span></div><span class="story-index">A SCENE FROM TODAY</span><div class="story-tag">THE DAY, IN YOUR OWN WAY</div><h2>Some days live beyond the camera.</h2><p>No activity photo was saved. The rest of your story is still here.</p></div>`]),
   ];
-  if (categories.memory) slides.push(`<div class="story-moment story-note-moment"><span class="story-index">A PERSON YOU MET</span><div class="story-icon memory" aria-hidden="true">♡</div><div class="story-tag">A NOTE TO YOURSELF</div><h2>A detail worth keeping.</h2>${attendee?.memory ? `<blockquote>${escapeHtml(attendee.memory)}</blockquote>` : '<p>A face you chose to remember.</p>'}${attendee?.memoryPhoto ? photoPreview(attendee.memoryPhoto, 'Private photo saved with your person memory') : ''}<span class="private-note">Only on this phone</span></div>`);
+  if (categories.memory) savedMemories.forEach((entry, index) => slides.push(`<div class="story-moment story-note-moment"><span class="story-index">A PERSON YOU MET · ${index + 1} / ${savedMemories.length}</span><div class="story-icon memory" aria-hidden="true">♡</div><div class="story-tag">A NOTE TO YOURSELF</div><h2>A detail worth keeping.</h2>${entry.text ? `<blockquote>${escapeHtml(entry.text)}</blockquote>` : '<p>A face you chose to remember.</p>'}${entry.photo ? photoPreview(entry.photo, 'Private photo saved with your person memory') : ''}<span class="private-note">Only on this phone</span></div>`));
   slides.push(`<div class="story-moment story-connection"><span class="story-index">A WAY BACK IN TOUCH</span><div class="story-icon reconnect" aria-hidden="true">↗</div><div class="story-tag">A DOOR LEFT OPEN</div><h2>${count ? 'A new way to say hello.' : 'Good conversations count, too.'}</h2><p>${count ? `You saved ${count} consensual way${count === 1 ? '' : 's'} to reconnect.` : 'No connection was saved this time. There’s no wrong way to meet someone.'}</p><div class="privacy-seal">Names and links<br>stay on this phone</div></div>`);
   if (missing.length) slides.push(`<div class="story-moment story-missing"><span class="story-index">OPEN PAGES ARE PART OF THE STORY</span><div class="missing-stamp" aria-hidden="true">STILL<br>YOURS</div><div class="story-tag">NO SCORE, NO CATCHING UP</div><h2>You kept what felt right.</h2><p>Nothing was saved for ${missing.join(', ')}. That’s okay; this day belongs to you either way.</p><div class="story-foot">Your recap reflects only what you chose to save.</div></div>`);
-  const type = participantType();
-  if (type) {
-    const saved = [categories.activity ? 'Activity photo' : '', categories.memory ? 'Person memory' : '', categories.connection ? 'Confirmed connection' : ''].filter(Boolean);
-    slides.push(`<div class="story-moment story-type"><span class="story-index">YOUR EVENT STYLE</span><div class="type-seal" aria-hidden="true">✳</div><div class="story-tag">MADE FROM THE MOMENTS YOU SAVED</div><h2>${type}</h2><p>Your saved moments include ${saved.map((item) => item.toLowerCase()).join(', ')}.</p><ul class="saved-category-list">${saved.map((item) => `<li><span aria-hidden="true">✓</span>${item}</li>`).join('')}</ul></div>`);
-  }
+  slides.push(participantTypeSlide(categories));
   slides.push(`<div class="story-ending"><div class="ending-flower" aria-hidden="true">✳</div><div class="story-tag">THAT WAS YOUR DAY</div><h2>Keep what<br>you want.<br><em>Let the rest go.</em></h2><p>This little book is yours to revisit.</p><button class="button primary" data-action="export">Make a shareable summary →</button><button class="text-button" data-action="keepsakes">See my keepsakes</button></div>`);
   return slides;
+}
+
+function participantTypeSlide(categories: ReturnType<typeof savedPersonalCategories>) {
+  const signalKey = participantSignalKey(categories);
+  if (participantAssessment.signalKey && participantAssessment.signalKey !== signalKey) {
+    participantAssessment = { status: 'idle', signalKey: '', traits: [] };
+  }
+  const signals = [
+    ['Activity photo', categories.activity],
+    ['Person memory', categories.memory],
+    ['Confirmed connection', categories.connection],
+  ] as const;
+  const signalsList = signals.map(([label, saved]) => `<li><span aria-hidden="true">${saved ? '✓' : '–'}</span>${label}: ${saved ? 'saved' : 'not saved'}</li>`).join('');
+  const disclosure = `<p class="trait-disclosure">If you ask, Remento sends OpenAI only these three yes/no facts: whether you saved an activity photo, a person memory, and a confirmed connection. It never sends your photo, note, name, profile link, or device ID.</p>`;
+  if (signalKey === '000') {
+    return `<div class="story-moment story-type"><span class="story-index">YOUR EVENT STYLE</span><div class="type-seal" aria-hidden="true">✳</div><div class="story-tag">ONLY WHAT YOU CHOSE TO SAVE</div><h2>Not enough to tell.</h2><p>You haven’t saved any of the three moments used for this optional description. No request will be sent.</p><ul class="saved-category-list">${signalsList}</ul></div>`;
+  }
+  if (participantAssessment.status === 'ready' && participantAssessment.signalKey === signalKey) {
+    const traits = participantAssessment.traits;
+    const title = traits.length >= 2 ? 'All-Rounder' : traits[0]?.label ?? 'No traits returned';
+    const traitRows = traits.map((trait) => `<li><span>${escapeHtml(trait.label)}</span><strong>${Math.round(trait.confidence * 100)}% confidence</strong></li>`).join('');
+    return `<div class="story-moment story-type"><span class="story-index">YOUR EVENT STYLE</span><div class="type-seal" aria-hidden="true">✳</div><div class="story-tag">A TENTATIVE READ OF THIS EVENT</div><h2>${escapeHtml(title)}</h2><p>This describes the moments you chose to save today. It isn’t a personality label.</p><ul class="trait-results">${traitRows}</ul>${disclosure}</div>`;
+  }
+  const loading = participantAssessment.status === 'loading' && participantAssessment.signalKey === signalKey;
+  const failed = participantAssessment.status === 'error' && participantAssessment.signalKey === signalKey;
+  return `<div class="story-moment story-type"><span class="story-index">YOUR EVENT STYLE</span><div class="type-seal" aria-hidden="true">✳</div><div class="story-tag">MADE FROM THIS EVENT ONLY</div><h2>What did you keep?</h2><p>These are choices made during this event, not a personality test.</p><ul class="saved-category-list">${signalsList}</ul>${disclosure}${failed ? '<p class="trait-feedback" role="alert">The result isn’t available right now. Your recap is still here; you can try again.</p>' : ''}${button(loading ? 'Reading your saved moments…' : failed ? 'Try again' : 'Ask OpenAI for event traits', 'request-participant-type', 'secondary', loading ? 'disabled aria-busy="true"' : '')}</div>`;
 }
 
 function recapScreen() {
@@ -319,6 +407,7 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
   if (options.recapDirection) recapMotion = options.recapDirection;
   app.innerHTML = screen === 'join' ? joinScreen()
     : screen === 'home' ? homeScreen()
+      : screen === 'index' ? milestoneIndexScreen()
       : screen === 'activity' ? activityScreen()
         : screen === 'memory' ? memoryScreen()
           : screen === 'qr' ? qrScreen()
@@ -347,7 +436,7 @@ function render(options: { navigation?: boolean; recapDirection?: number } = {})
   }
 }
 
-const screenOrder: Record<Screen, number> = { join: 0, home: 1, activity: 2, memory: 2, qr: 3, scan: 3, keepsakes: 4, recap: 5, export: 6, organizer: 0 };
+const screenOrder: Record<Screen, number> = { join: 0, home: 1, index: 2, activity: 3, memory: 3, qr: 4, scan: 4, keepsakes: 5, recap: 6, export: 7, organizer: 0 };
 let previousScreen: Screen = screen;
 
 function setScreen(next: Screen) {
@@ -363,8 +452,9 @@ function setScreen(next: Screen) {
   render({ navigation: true });
 }
 
-async function api<T>(action: string, method: 'GET' | 'POST' = 'GET', body?: unknown, token = ''): Promise<T> {
-  const response = await fetch(`/api/event?action=${action}`, {
+async function api<T>(action: string, method: 'GET' | 'POST' = 'GET', body?: unknown, token = '', endpoint = '/api/event'): Promise<T> {
+  const url = endpoint === '/api/event' ? `${endpoint}?action=${action}` : endpoint;
+  const response = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { 'x-organizer-token': token } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -381,7 +471,7 @@ async function refreshStatus() {
     status = await api<Status>('status');
     eventInfo = status.event;
     organizerCountChanged = screen === 'organizer' && previousJoinCount !== status.joinCount;
-    if (attendee && status.closedAt && screen !== 'recap' && screen !== 'export' && screen !== 'organizer') setScreen('recap');
+    if (attendee && status.closedAt && screen !== 'recap' && screen !== 'export' && screen !== 'organizer' && screen !== 'index' && screen !== 'keepsakes') setScreen(completeCount() === 4 ? 'index' : 'recap');
     else if (screen === 'organizer' || (screen === 'join' && previousClosedAt !== status.closedAt)) render();
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : 'Could not connect to the event service.';
@@ -476,38 +566,46 @@ function bindEvents() {
       const action = target.dataset.action;
       if (!action) return;
       if (action === 'keepsakes' || action === 'connections') { setScreen('keepsakes'); return; }
+      if (action === 'index') { setScreen('index'); return; }
+      if (action === 'event-wrap') { app.querySelector<HTMLDialogElement>('.event-wrap-dialog')?.showModal(); return; }
+      if (action === 'cancel-event-wrap') { app.querySelector<HTMLDialogElement>('.event-wrap-dialog')?.close(); return; }
+      if (action === 'confirm-event-wrap') { app.querySelector<HTMLDialogElement>('.event-wrap-dialog')?.close(); setScreen('recap'); return; }
       if (['activity', 'memory', 'qr', 'scan', 'home', 'recap', 'export'].includes(action)) {
         const current = attendee?.milestone ?? 0;
-        if ((action === 'activity' && current !== 1) || (action === 'memory' && current !== 2) || (['qr', 'scan'].includes(action) && current < 3 && screen !== 'keepsakes')) return;
-        setScreen(action as Screen); return;
+        const allDone = completeCount() === 4;
+        if ((action === 'activity' && current !== 1 && !allDone) || (action === 'memory' && current !== 2 && !allDone) || (['qr', 'scan'].includes(action) && current < 3 && screen !== 'keepsakes' && screen !== 'index')) return;
+        setScreen(action === 'home' && allDone ? 'index' : action as Screen); return;
       }
-      if (action === 'back') { setScreen('home'); return; }
+      if (action === 'back') { setScreen(completeCount() === 4 ? 'index' : 'home'); return; }
       if (action === 'replace-activity') { activityDraft = ''; setScreen('activity'); return; }
       if (action === 'save-activity') {
         if (!attendee || !activityDraft) return;
-        attendee.activityPhoto = activityDraft;
+        attendee.activityPhotos = activityPhotos().concat(activityDraft);
+        attendee.activityPhoto ||= activityDraft;
         advanceMilestone();
-        if (saveLocal()) { activityDraft = ''; savedStamp = true; setScreen('home'); }
+        if (saveLocal()) { activityDraft = ''; savedStamp = true; setScreen(completeCount() === 4 ? 'index' : 'home'); }
         else render();
       }
-      if (action === 'delete-activity' && attendee && confirm('Delete this activity photo from this phone?')) { attendee.activityPhoto = ''; saveLocal(); setScreen('home'); }
+      if (action === 'delete-activity' && attendee && confirm('Delete this activity photo from this phone?')) { attendee.activityPhoto = ''; attendee.activityPhotos = []; saveLocal(); setScreen(completeCount() === 4 ? 'index' : 'home'); }
       if (action === 'remove-activity-photo' && attendee && confirm('Remove this activity photo from your keepsakes?')) {
         const card = target.closest<HTMLElement>('.keepsake-photo');
-        if (card) removeWithMotion(card, () => { attendee!.activityPhoto = ''; if (saveLocal()) render(); });
+        const photoIndex = Number(target.dataset.index);
+        if (card) removeWithMotion(card, () => { attendee!.activityPhotos = activityPhotos().filter((_, index) => index !== photoIndex); attendee!.activityPhoto = attendee!.activityPhotos[0] ?? ''; if (saveLocal()) render(); });
       }
       if (action === 'delete-memory-photo' && attendee && confirm('Remove this optional photo? Your text note will stay.')) { attendee.memoryPhoto = ''; saveLocal(); setScreen('memory'); }
       if (action === 'remove-memory-photo' && attendee && confirm('Remove this optional photo from your keepsakes?')) {
         const card = target.closest<HTMLElement>('.keepsake-photo');
-        if (card) removeWithMotion(card, () => { attendee!.memoryPhoto = ''; if (saveLocal()) render(); });
+        const entryIndex = Number(target.dataset.index);
+        if (card) removeWithMotion(card, () => { const entries = memories(); if (entries[entryIndex]) entries[entryIndex] = { ...entries[entryIndex], photo: undefined }; attendee!.memories = entries; attendee!.memoryPhoto = entries.find((entry) => entry.photo)?.photo ?? ''; if (saveLocal()) render(); });
       }
       if (action === 'remove-link' && attendee) { attendee.links = attendee.links.filter((link) => link.url !== target.dataset.url); saveLocal(); void updateQr(); }
       if (action === 'confirm-connection' && attendee && scannedConnection) {
         attendee.connections = [...attendee.connections, { ...scannedConnection, savedAt: new Date().toISOString() }];
         advanceMilestone();
-        if (saveLocal()) { scannedConnection = null; savedStamp = true; setScreen('home'); }
+        if (saveLocal()) { scannedConnection = null; savedStamp = true; setScreen(completeCount() === 4 ? 'index' : 'home'); }
         else render();
       }
-      if (action === 'decline-connection') { scannedConnection = null; setScreen('home'); }
+      if (action === 'decline-connection') { scannedConnection = null; setScreen(completeCount() === 4 ? 'index' : 'home'); }
       if (action === 'remove-connection' && attendee && confirm('Remove this saved connection from this phone?')) {
         const card = target.closest<HTMLElement>('.connection-card');
         if (card) removeWithMotion(card, () => { attendee!.connections.splice(Number(target.dataset.index), 1); saveLocal(); render(); });
@@ -515,6 +613,7 @@ function bindEvents() {
       if (action === 'dismiss-nudge' && attendee) { const cue = cueForNow(); if (cue) attendee.dismissedCues.push(cue); saveLocal(); render(); }
       if (action === 'previous-story') { const nextIndex = Math.max(0, recapIndex - 1); if (nextIndex !== recapIndex) { recapIndex = nextIndex; render({ recapDirection: -1 }); } }
       if (action === 'next-story') { if (recapIndex === recapSlides().length - 1) setScreen('export'); else { recapIndex++; render({ recapDirection: 1 }); } }
+      if (action === 'request-participant-type') void requestParticipantTraits();
       if (action === 'create-export' || action === 'download-export') void buildExport(action === 'download-export');
       if (action === 'share-export') void shareExport();
       if (action === 'copy-event-link') void copyText(`${location.origin}${location.pathname}?event=${eventKey}`);
@@ -523,6 +622,7 @@ function bindEvents() {
       if (action === 'start-camera') void startCamera();
     });
   });
+
 
   document.querySelector<HTMLFormElement>('#join-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -538,7 +638,7 @@ function bindEvents() {
       advanceMilestone();
       if (!saveLocal()) { render(); return; }
       await refreshStatus();
-      setScreen(status.closedAt ? 'recap' : 'home');
+      setScreen(status.closedAt ? (completeCount() === 4 ? 'index' : 'recap') : completeCount() === 4 ? 'index' : 'home');
     } catch (error) { errorMessage = error instanceof Error ? error.message : 'Could not join right now.'; render(); }
   });
 
@@ -561,13 +661,15 @@ function bindEvents() {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const memory = String(new FormData(form).get('memory') ?? '').trim();
-    if (!memory && !memoryPhotoDraft && !attendee?.memoryPhoto) { errorMessage = 'Add a small text detail to save this memory.'; render(); return; }
+    if (!memory && !memoryPhotoDraft) { errorMessage = 'Add a small text detail or an approved photo to save this memory.'; render(); return; }
     if (memoryPhotoDraft && !form.querySelector<HTMLInputElement>('#photo-consent')?.checked) { errorMessage = 'Please confirm you have permission before saving their photo. You can leave it off and save your text instead.'; render(); return; }
     if (attendee) {
-      attendee.memory = memory;
-      if (memoryPhotoDraft) attendee.memoryPhoto = memoryPhotoDraft;
+      const entry = { text: memory, ...(memoryPhotoDraft ? { photo: memoryPhotoDraft } : {}), savedAt: new Date().toISOString() };
+      attendee.memories = memories().concat(entry);
+      attendee.memory ||= memory;
+      if (memoryPhotoDraft) attendee.memoryPhoto ||= memoryPhotoDraft;
       advanceMilestone();
-      if (saveLocal()) { memoryPhotoDraft = ''; memoryDraft = ''; savedStamp = true; setScreen('home'); } else render();
+      if (saveLocal()) { memoryPhotoDraft = ''; memoryDraft = ''; savedStamp = true; setScreen(completeCount() === 4 ? 'index' : 'home'); } else render();
     }
   });
 

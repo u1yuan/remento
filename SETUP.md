@@ -9,13 +9,15 @@ The temporary Upstash database has been claimed, according to the project handof
 ## Configure and run
 
 1. Use the claimed temporary database for Development and Preview. Create a separate durable Upstash Redis database for Production.
-2. In the linked Vercel `remento` project, set `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and the existing strong `ORGANIZER_TOKEN` for Development, Preview, and Production. Use the temporary database credentials only for Development and Preview; use the durable database credentials for Production.
+2. In the linked Vercel `remento` project, set `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, the existing strong `ORGANIZER_TOKEN`, and `OPENAI_API_KEY` for Development, Preview, and Production. Use the temporary database credentials only for Development and Preview; use the durable database credentials for Production. `OPENAI_API_KEY` is used only by the optional attendee-requested event-style recap feature and must remain server-side.
 3. Pull Development variables with `vercel env pull .env.local` when needed, then start the app and API with `npm run dev`.
 4. After Production variables are configured, deploy with `vercel --prod` and verify `/api/event?action=status` returns HTTP 200 with the expected event data.
 
 The organizer view is the private URL `/?organize=<ORGANIZER_TOKEN>`. Keep it private. The attendee invite is `/?event=codex-uiai-2026`; attendees cannot close the event. Deploy with `vercel --prod` after the linked project has the Production variables.
 
 `ORGANIZER_TOKEN` is a private close capability, not attendee sign-in. Event configuration, close state, and opaque per-browser join IDs are stored in Redis. Photos, notes, profile links, connections, and recap data stay in each attendee’s browser storage.
+
+The optional participant-trait route requires `OPENAI_API_KEY`. Its value stays server-side. The recap discloses that only saved/not-saved moment signals are sent to OpenAI after the attendee taps the request action.
 
 ## Submission draft
 
