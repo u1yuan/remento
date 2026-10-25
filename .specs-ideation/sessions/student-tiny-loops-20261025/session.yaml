@@ -1,0 +1,18 @@
+session:
+  id: student-tiny-loops-20261025
+  topic: "Tiny cross-domain student problem loops"
+  created: 2026-10-25T05:13:05Z
+  updated: 2026-10-25T05:13:05Z
+  phase: flame
+spark:
+  batches_generated: 0
+  total_ideas: 0
+  favorites: []
+flame:
+  ideas_evaluated: 6
+  shortlist: [pasa, receipt-raccoon, muddy-moth, heckle, patch-possum]
+  scoring_method: "Five rapid perspectives; Red Hat pending; provisional impact, feasibility, and novelty scores"
+  red_hat: pending_user_reaction
+forge:
+  concepts_shaped: 0
+  briefs_generated: []
